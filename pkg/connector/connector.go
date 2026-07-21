@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/ptr"
@@ -14,6 +15,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/id"
 
 	"github.com/Leicas/matrisms/pkg/common"
 )
@@ -36,6 +38,10 @@ type SMSConnector struct {
 	// logins" enumerator).
 	clientsMu sync.Mutex
 	clients   map[networkid.UserLoginID]*SMSClient
+
+	// networkIcon holds the mxc URI (string) of the uploaded bridge logo,
+	// set by setupLogo and served through GetName.
+	networkIcon atomic.Value
 }
 
 func (sc *SMSConnector) registerClient(id networkid.UserLoginID, client *SMSClient) {
@@ -72,10 +78,11 @@ var (
 )
 
 func (sc *SMSConnector) GetName() bridgev2.BridgeName {
+	icon, _ := sc.networkIcon.Load().(string)
 	return bridgev2.BridgeName{
 		DisplayName:          "Matrisms",
 		NetworkURL:           "https://voip.ms",
-		NetworkIcon:          "",
+		NetworkIcon:          id.ContentURIString(icon),
 		NetworkID:            "voipms-sms",
 		BeeperBridgeType:     "voipms-sms",
 		DefaultPort:          29331,
@@ -131,6 +138,7 @@ func (sc *SMSConnector) Init(bridge *bridgev2.Bridge) {
 
 func (sc *SMSConnector) Start(ctx context.Context) error {
 	sc.Bridge.Log.Info().Msg("VoIP.ms SMS connector starting...")
+	sc.setupLogo(ctx)
 	if sc.Config.Webhook.Enabled {
 		if err := sc.Webhook.Start(); err != nil {
 			return fmt.Errorf("failed to start SMS webhook listener: %w", err)
@@ -213,6 +221,7 @@ func (sc *SMSConnector) GetChatInfo(ctx context.Context, portal *bridgev2.Portal
 		return &bridgev2.ChatInfo{
 			Name:    &spaceName,
 			Topic:   &topic,
+			Avatar:  sc.logoAvatar(),
 			Type:    ptr.Ptr(database.RoomTypeSpace),
 			Members: members,
 		}, nil

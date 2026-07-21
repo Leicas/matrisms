@@ -304,6 +304,47 @@ func (saq *SMSAccountQuery) CreateTable(ctx context.Context) error {
 			PRIMARY KEY (user_mxid, api_username, did)
 		)
 	`)
+	if err != nil {
+		return err
+	}
+
+	// Small bridge-level key/value store (e.g. the mxc URI of the uploaded
+	// network logo). Lives in the DB because ./data may be read-only for the
+	// container user.
+	_, err = saq.DB.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS sms_bridge_kv (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)
+	`)
+	return err
+}
+
+// GetKV reads a bridge-level key/value entry ("" when absent).
+func (saq *SMSAccountQuery) GetKV(ctx context.Context, key string) (string, error) {
+	rows, err := saq.DB.Query(ctx, dialectQuery(saq.DB.Dialect, `
+		SELECT value FROM sms_bridge_kv WHERE key = ?
+	`), key)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return "", rows.Err()
+	}
+	var value string
+	if err := rows.Scan(&value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+// SetKV upserts a bridge-level key/value entry.
+func (saq *SMSAccountQuery) SetKV(ctx context.Context, key, value string) error {
+	_, err := saq.DB.Exec(ctx, dialectQuery(saq.DB.Dialect, `
+		INSERT INTO sms_bridge_kv (key, value) VALUES (?, ?)
+		ON CONFLICT (key) DO UPDATE SET value = excluded.value
+	`), key, value)
 	return err
 }
 
