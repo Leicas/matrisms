@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/Leicas/matrisms/compare/v1.0.1...v1.0.2) (2026-07-21)
+
+
+### Bug Fixes
+
+* register UserLogin metadata type and connect after interactive login ([c43e973](https://github.com/Leicas/matrisms/commit/c43e9735195e6eedf80920ddba273da9e13fc536))
+
 ## [1.0.1](https://github.com/Leicas/matrisms/compare/v1.0.0...v1.0.1) (2026-07-21)
 
 
