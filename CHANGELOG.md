@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/Leicas/matrisms/compare/v1.2.0...v1.2.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* keep same-second message segments in send order ([52f6973](https://github.com/Leicas/matrisms/commit/52f697395b4ecdbd07fbc7101168f0f809799ce5))
+
 ## [1.2.0](https://github.com/Leicas/matrisms/compare/v1.1.0...v1.2.0) (2026-07-21)
 
 
