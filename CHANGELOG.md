@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/Leicas/matrisms/compare/v1.0.0...v1.0.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* POST as multipart/form-data — rest.php parses urlencoded bodies as SOAP ([207caac](https://github.com/Leicas/matrisms/commit/207caac94074566be4bbc60065c0c39cbe0cc4f9))
+
 ## 1.0.0 (2026-07-21)
 
 
