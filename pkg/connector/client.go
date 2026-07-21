@@ -275,6 +275,8 @@ func (c *SMSClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 		"image/jpeg": event.CapLevelFullySupported,
 		"image/png":  event.CapLevelFullySupported,
 		"image/gif":  event.CapLevelFullySupported,
+		// Converted to JPEG on send (FitImageToMMS decodes webp).
+		"image/webp": event.CapLevelPartialSupport,
 	}
 	return &event.RoomFeatures{
 		ID: "matrisms-voipms-v1",
@@ -297,8 +299,9 @@ func (c *SMSClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 		File: event.FileFeatureMap{
 			event.MsgImage: {
 				MimeTypes: mmsMime,
-				MaxSize:   voipms.MMSMaxMediaBytes,
-				Caption:   event.CapLevelFullySupported,
+				// Larger images are shrunk to the ~1.3 MB MMS cap on send.
+				MaxSize: DefaultMaxUploadBytes,
+				Caption: event.CapLevelFullySupported,
 			},
 			event.MsgVideo: {
 				MimeTypes: map[string]event.CapabilitySupportLevel{

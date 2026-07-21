@@ -107,15 +107,29 @@ func (c *SMSClient) downloadMatrixMedia(ctx context.Context, content *event.Mess
 	if err != nil {
 		return voipms.MediaUpload{}, err
 	}
-	if len(data) > voipms.MMSMaxMediaBytes {
-		return voipms.MediaUpload{}, fmt.Errorf("attachment is %d bytes; VoIP.ms MMS caps media at %d bytes", len(data), voipms.MMSMaxMediaBytes)
-	}
 	mime := ""
 	if content.Info != nil {
 		mime = content.Info.MimeType
 	}
 	if mime == "" {
 		mime = "application/octet-stream"
+	}
+	if len(data) > voipms.MMSMaxMediaBytes {
+		if !strings.HasPrefix(mime, "image/") {
+			return voipms.MediaUpload{}, fmt.Errorf("attachment is %d bytes; VoIP.ms MMS caps media at %d bytes", len(data), voipms.MMSMaxMediaBytes)
+		}
+		// Phone photos routinely exceed the ~1.3 MB cap — shrink instead of
+		// bouncing the message back at the user.
+		shrunk, shrunkMime, err := voipms.FitImageToMMS(data, mime, voipms.MMSMaxMediaBytes)
+		if err != nil {
+			return voipms.MediaUpload{}, err
+		}
+		c.UserLogin.Log.Debug().
+			Int("original_bytes", len(data)).
+			Int("shrunk_bytes", len(shrunk)).
+			Str("mime", shrunkMime).
+			Msg("Shrunk oversized MMS image")
+		data, mime = shrunk, shrunkMime
 	}
 	return voipms.MediaUpload{Data: data, Mime: mime}, nil
 }
