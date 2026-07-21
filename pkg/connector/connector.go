@@ -221,7 +221,12 @@ func (sc *SMSConnector) GetLoginFlows() []bridgev2.LoginFlow {
 }
 
 func (sc *SMSConnector) GetDBMetaTypes() database.MetaTypes {
-	return database.MetaTypes{}
+	return database.MetaTypes{
+		// Without this factory the framework can't deserialize UserLogin
+		// metadata from the DB at startup, and LoadUserLogin fails with
+		// "no API username metadata" after a bridge restart.
+		UserLogin: func() any { return &SMSLoginMetadata{} },
+	}
 }
 
 func (sc *SMSConnector) GetBridgeInfoVersion() (int, int) {

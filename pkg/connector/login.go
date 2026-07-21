@@ -202,6 +202,13 @@ func (lp *SMSLoginProcess) completeLogin(ctx context.Context) (*bridgev2.LoginSt
 		return nil, fmt.Errorf("failed to create user login: %w", err)
 	}
 
+	// The framework only calls Client.Connect in StartLogins at bridge
+	// startup; logins created interactively must start their own
+	// connection (this is what kicks off the poller).
+	if userLogin.Client != nil {
+		go userLogin.Client.Connect(userLogin.Log.WithContext(context.Background()))
+	}
+
 	var numberList strings.Builder
 	for _, did := range lp.selectedDIDs {
 		fmt.Fprintf(&numberList, "\n  • %s", common.FormatPhone(did))
