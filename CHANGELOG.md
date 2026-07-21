@@ -1,3 +1,10 @@
+## [1.4.0](https://github.com/Leicas/matrisms/compare/v1.3.0...v1.4.0) (2026-07-21)
+
+
+### Features
+
+* convert reaction-fallback texts into real Matrix reactions ([48d2489](https://github.com/Leicas/matrisms/commit/48d24892fa47f27e764418d784ba68b36224b3d1))
+
 ## [1.3.0](https://github.com/Leicas/matrisms/compare/v1.2.1...v1.3.0) (2026-07-21)
 
 
