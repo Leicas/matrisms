@@ -262,6 +262,24 @@ func TestSetContactNameAddsNew(t *testing.T) {
 	}
 }
 
+func TestSortMessagesTieBreaksOnID(t *testing.T) {
+	ts := time.Date(2026, 7, 21, 10, 0, 0, 0, time.UTC)
+	msgs := []Message{
+		{ID: "1003", Date: ts, Body: "part three"},
+		{ID: "999", Date: ts, Body: "part one"}, // shorter string but numerically first
+		{ID: "1001", Date: ts, Body: "part two"},
+		{ID: "500", Date: ts.Add(-time.Minute), Body: "earlier"},
+		{ID: "2000", Date: ts.Add(time.Minute), Body: "later"},
+	}
+	SortMessages(msgs)
+	wantOrder := []string{"500", "999", "1001", "1003", "2000"}
+	for i, want := range wantOrder {
+		if msgs[i].ID != want {
+			t.Fatalf("position %d: got ID %s, want %s (order: %v)", i, msgs[i].ID, want, msgs)
+		}
+	}
+}
+
 func TestEmptyStatusIsNotError(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"status":"no_sms"}`))

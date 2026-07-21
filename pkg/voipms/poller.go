@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -112,6 +113,25 @@ func (p *Poller) pollOnce(ctx context.Context) {
 	}
 }
 
+// SortMessages orders messages for delivery: by timestamp, then by numeric
+// message ID. Timestamps are second-granular, so the segments of a long text
+// routinely share one — VoIP.ms IDs increase monotonically, making the ID the
+// only reliable send-order signal within a second. Without the tie-break,
+// same-second segments arrive in whatever order the API listed them.
+func SortMessages(msgs []Message) {
+	sort.SliceStable(msgs, func(i, j int) bool {
+		if !msgs[i].Date.Equal(msgs[j].Date) {
+			return msgs[i].Date.Before(msgs[j].Date)
+		}
+		a, errA := strconv.ParseInt(msgs[i].ID, 10, 64)
+		b, errB := strconv.ParseInt(msgs[j].ID, 10, 64)
+		if errA == nil && errB == nil {
+			return a < b
+		}
+		return msgs[i].ID < msgs[j].ID
+	})
+}
+
 func (p *Poller) pollDID(ctx context.Context, did string) error {
 	raw, err := p.CursorLoad(ctx, did)
 	if err != nil {
@@ -142,7 +162,7 @@ func (p *Poller) pollDID(ctx context.Context, did string) error {
 	if err != nil {
 		return err
 	}
-	sort.SliceStable(msgs, func(i, j int) bool { return msgs[i].Date.Before(msgs[j].Date) })
+	SortMessages(msgs)
 
 	newest := cursor.LastDate
 	for i := range msgs {
