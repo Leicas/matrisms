@@ -20,6 +20,9 @@ import (
 // outbound echoes, which were stored under the same ID at send time) are
 // dropped by the framework.
 func (c *SMSClient) handleRemoteMessage(ctx context.Context, msg *voipms.Message) error {
+	if !msg.Inbound && c.isSentEcho(common.MessageIDFor(msg.IsMMS, msg.ID)) {
+		return nil // echo of a message this bridge sent without a DB row
+	}
 	portalKey := networkid.PortalKey{
 		ID:       common.PortalIDFor(msg.DID, msg.Contact),
 		Receiver: c.UserLogin.ID,

@@ -13,6 +13,12 @@ voipms:
     # Max size in bytes for a single inbound MMS media upload to Matrix.
     # 0 means the default (26214400 = 25 MiB). Set -1 to disable the check.
     max_upload_bytes: 0
+    # Use the VoIP.ms phonebook to name contacts (ghost users and rooms show
+    # "Jane Doe" instead of a bare number). Rename contacts from Matrix with
+    # `!matrisms rename <name>` inside a conversation room.
+    phonebook_names: true
+    # How long (minutes) phonebook names are cached before re-fetching.
+    phonebook_refresh_minutes: 15
 
 # Optional instant-delivery webhook. When enabled, point the VoIP.ms
 # "SMS URL Callback" (Main Menu → DID Settings) at this listener and messages

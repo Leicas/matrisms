@@ -40,6 +40,27 @@ func TestPortalIDRoundtrip(t *testing.T) {
 	}
 }
 
+func TestDIDPortalIDRoundtrip(t *testing.T) {
+	id := DIDPortalIDFor("5551234567")
+	if string(id) != "did:15551234567" {
+		t.Errorf("DIDPortalIDFor = %q", id)
+	}
+	did, ok := ParseDIDPortalID(id)
+	if !ok || did != "15551234567" {
+		t.Errorf("ParseDIDPortalID = %q %v", did, ok)
+	}
+	if _, ok := ParseDIDPortalID(PortalIDFor("5551234567", "5559876543")); ok {
+		t.Error("conversation portal ID should not parse as DID portal")
+	}
+	if _, ok := ParseDIDPortalID("did:"); ok {
+		t.Error("empty DID should not parse")
+	}
+	// A DID space portal must never be mistaken for a conversation portal.
+	if _, _, ok := ParsePortalID(id); ok {
+		t.Error("DID portal ID should not parse as conversation portal")
+	}
+}
+
 func TestMessageIDFor(t *testing.T) {
 	if got := MessageIDFor(false, "123"); string(got) != "sms:123" {
 		t.Errorf("MessageIDFor sms = %q", got)

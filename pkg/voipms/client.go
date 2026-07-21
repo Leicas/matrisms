@@ -71,10 +71,11 @@ func errorsAs(err error, target **APIError) bool {
 
 // emptyStatuses are API statuses that mean "no data", not "error".
 var emptyStatuses = map[string]bool{
-	"no_sms":      true,
-	"no_mms":      true,
-	"no_did":      true,
-	"invalid_did": true, // per-DID SMS-not-enabled; skip, don't fatal
+	"no_sms":       true,
+	"no_mms":       true,
+	"no_did":       true,
+	"invalid_did":  true, // per-DID SMS-not-enabled; skip, don't fatal
+	"no_phonebook": true,
 }
 
 // Client is a minimal VoIP.ms REST API client covering the SMS/MMS surface.
@@ -261,65 +262,189 @@ func decodeBody(raw string) string {
 	return raw
 }
 
-// GetMessages fetches all SMS and MMS for one DID in [from, to] (dates are
-// day-granular in the API's -5 timezone; the range must stay under 92 days).
-// Uses getMMS with all_messages=1, which returns both message types in one
-// list — rows with media are MMS.
-func (c *Client) GetMessages(ctx context.Context, did string, from, to time.Time) ([]Message, error) {
+// messageRow is the wire shape of one getSMS/getMMS row. Both methods return
+// the row array under the JSON key "sms".
+type messageRow struct {
+	ID      flexString `json:"id"`
+	Date    flexString `json:"date"`
+	Type    flexString `json:"type"` // "1" received, "0" sent
+	DID     flexString `json:"did"`
+	Contact flexString `json:"contact"`
+	Message flexString `json:"message"`
+	Media1  flexString `json:"col_media1"`
+	Media2  flexString `json:"col_media2"`
+	Media3  flexString `json:"col_media3"`
+}
+
+func (c *Client) fetchMessageRows(ctx context.Context, method, did string, from, to time.Time) ([]messageRow, error) {
 	params := url.Values{}
 	params.Set("did", apiDID(did))
 	params.Set("limit", "1000000")
 	params.Set("from", from.In(apiLocation).Format("2006-01-02"))
 	params.Set("to", to.In(apiLocation).Format("2006-01-02"))
 	params.Set("timezone", fmt.Sprintf("%d", apiUTCOffsetHours))
-	params.Set("all_messages", "1")
 
 	var out struct {
-		// Both getSMS and getMMS return the row array under the key "sms".
-		Rows []struct {
-			ID      flexString `json:"id"`
-			Date    flexString `json:"date"`
-			Type    flexString `json:"type"` // "1" received, "0" sent
-			DID     flexString `json:"did"`
-			Contact flexString `json:"contact"`
-			Message flexString `json:"message"`
-			Media1  flexString `json:"col_media1"`
-			Media2  flexString `json:"col_media2"`
-			Media3  flexString `json:"col_media3"`
-		} `json:"sms"`
+		Rows []messageRow `json:"sms"`
 	}
-	if err := c.call(ctx, "getMMS", params, &out); err != nil {
+	if err := c.call(ctx, method, params, &out); err != nil {
+		return nil, err
+	}
+	return out.Rows, nil
+}
+
+func (row *messageRow) toMessage(isMMS bool) Message {
+	var media []string
+	for _, m := range []string{string(row.Media1), string(row.Media2), string(row.Media3)} {
+		if m != "" && m != "null" {
+			media = append(media, m)
+		}
+	}
+	date, err := time.ParseInLocation("2006-01-02 15:04:05", string(row.Date), apiLocation)
+	if err != nil {
+		date = time.Now()
+	}
+	return Message{
+		ID:      string(row.ID),
+		IsMMS:   isMMS,
+		Inbound: string(row.Type) == "1",
+		DID:     NormalizeNumber(string(row.DID)),
+		Contact: NormalizeNumber(string(row.Contact)),
+		Body:    decodeBody(string(row.Message)),
+		Date:    date.UTC(),
+		Media:   media,
+	}
+}
+
+// GetMessages fetches all SMS and MMS for one DID in [from, to] (dates are
+// day-granular in the API's -5 timezone; the range must stay under 92 days).
+//
+// SMS and MMS are fetched with separate getSMS/getMMS calls instead of the
+// single getMMS+all_messages=1 merge: the merged list only reveals a row as
+// MMS through its col_media* columns, which the API frequently omits — an
+// image-only MMS would then be misclassified as an empty SMS and dropped.
+// With a definitive per-method type, media-less MMS rows survive and their
+// attachments are recovered later via getMediaMMS.
+func (c *Client) GetMessages(ctx context.Context, did string, from, to time.Time) ([]Message, error) {
+	mmsRows, err := c.fetchMessageRows(ctx, "getMMS", did, from, to)
+	if err != nil {
+		return nil, err
+	}
+	smsRows, err := c.fetchMessageRows(ctx, "getSMS", did, from, to)
+	if err != nil {
 		return nil, err
 	}
 
-	msgs := make([]Message, 0, len(out.Rows))
-	for _, row := range out.Rows {
-		var media []string
-		for _, m := range []string{string(row.Media1), string(row.Media2), string(row.Media3)} {
-			if m != "" && m != "null" {
-				media = append(media, m)
-			}
-		}
-		body := decodeBody(string(row.Message))
-		if body == "" && len(media) == 0 {
+	msgs := make([]Message, 0, len(mmsRows)+len(smsRows))
+	// Guard against getSMS mirroring MMS rows (observed API behavior varies):
+	// drop any SMS row that exactly matches an MMS row from the same batch.
+	seenMMS := make(map[string]bool, len(mmsRows))
+	for i := range mmsRows {
+		msg := mmsRows[i].toMessage(true)
+		msgs = append(msgs, msg)
+		seenMMS[msg.Date.Format(time.RFC3339)+"|"+msg.Contact+"|"+fmt.Sprintf("%t", msg.Inbound)+"|"+msg.Body] = true
+	}
+	for i := range smsRows {
+		msg := smsRows[i].toMessage(false)
+		if msg.Body == "" {
 			continue // malformed row, mirror the Android client's skip
 		}
-		date, err := time.ParseInLocation("2006-01-02 15:04:05", string(row.Date), apiLocation)
-		if err != nil {
-			date = time.Now()
+		if seenMMS[msg.Date.Format(time.RFC3339)+"|"+msg.Contact+"|"+fmt.Sprintf("%t", msg.Inbound)+"|"+msg.Body] {
+			continue
 		}
-		msgs = append(msgs, Message{
-			ID:      string(row.ID),
-			IsMMS:   len(media) > 0,
-			Inbound: string(row.Type) == "1",
-			DID:     NormalizeNumber(string(row.DID)),
-			Contact: NormalizeNumber(string(row.Contact)),
-			Body:    body,
-			Date:    date.UTC(),
-			Media:   media,
-		})
+		msgs = append(msgs, msg)
 	}
 	return msgs, nil
+}
+
+// PhonebookEntry is one VoIP.ms phonebook contact.
+type PhonebookEntry struct {
+	// ID is the numeric phonebook entry id (string form).
+	ID string
+	// Name is the contact's display name.
+	Name string
+	// Number is the contact's phone number, normalized digits. Internal
+	// speed-dial entries (SIP accounts etc.) have short or empty numbers.
+	Number string
+	// SpeedDial, CallerID and Note are carried through so updates via
+	// setPhonebook don't wipe them.
+	SpeedDial string
+	CallerID  string
+	Note      string
+}
+
+// GetPhonebook fetches all phonebook entries on the account.
+func (c *Client) GetPhonebook(ctx context.Context) ([]PhonebookEntry, error) {
+	var out struct {
+		Entries []struct {
+			ID        flexString `json:"phonebook"`
+			SpeedDial flexString `json:"speed_dial"`
+			Name      flexString `json:"name"`
+			Number    flexString `json:"number"`
+			CallerID  flexString `json:"callerid"`
+			Note      flexString `json:"note"`
+		} `json:"phonebooks"`
+	}
+	if err := c.call(ctx, "getPhonebook", url.Values{}, &out); err != nil {
+		return nil, err
+	}
+	entries := make([]PhonebookEntry, 0, len(out.Entries))
+	for _, e := range out.Entries {
+		entries = append(entries, PhonebookEntry{
+			ID:        string(e.ID),
+			Name:      string(e.Name),
+			Number:    NormalizeNumber(string(e.Number)),
+			SpeedDial: string(e.SpeedDial),
+			CallerID:  string(e.CallerID),
+			Note:      string(e.Note),
+		})
+	}
+	return entries, nil
+}
+
+// SetContactName creates or renames the phonebook entry for a number and
+// returns the resulting entry. Existing entries keep their speed dial,
+// caller ID and note.
+func (c *Client) SetContactName(ctx context.Context, number, name string) (*PhonebookEntry, error) {
+	number = NormalizeNumber(number)
+	entries, err := c.GetPhonebook(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.Number != number {
+			continue
+		}
+		params := url.Values{}
+		params.Set("phonebook", e.ID)
+		params.Set("name", name)
+		params.Set("number", apiDID(e.Number))
+		if e.SpeedDial != "" {
+			params.Set("speed_dial", e.SpeedDial)
+		}
+		if e.CallerID != "" {
+			params.Set("callerid", e.CallerID)
+		}
+		if e.Note != "" {
+			params.Set("note", e.Note)
+		}
+		if err := c.call(ctx, "setPhonebook", params, nil); err != nil {
+			return nil, err
+		}
+		e.Name = name
+		return &e, nil
+	}
+
+	params := url.Values{}
+	params.Set("name", name)
+	params.Set("number", apiDID(number))
+	var out struct {
+		Phonebook json.Number `json:"phonebook"`
+	}
+	if err := c.call(ctx, "addPhonebook", params, &out); err != nil {
+		return nil, err
+	}
+	return &PhonebookEntry{ID: out.Phonebook.String(), Name: name, Number: number}, nil
 }
 
 // GetMMSMedia fetches the media URL list for one MMS by id. getMMS

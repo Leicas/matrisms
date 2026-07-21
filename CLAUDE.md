@@ -23,18 +23,27 @@ credential encryption, reliability helpers, and CI pipeline are shared DNA.
 ## ID conventions (load-bearing)
 
 - Portal: `sms:<did>:<peer>` (normalized 11-digit), Receiver = UserLoginID
+- DID space portal: `did:<did>` (Receiver empty — bridgev2 parent portals are global); every conversation portal sets it as ChatInfo.ParentID
 - Ghost: `sms:<peer-number>`
-- Message: `sms:<voipms-id>` / `mms:<voipms-id>`
+- Message: `sms:<voipms-id>` / `mms:<voipms-id>` (separate id spaces per method)
 - UserLogin: `voipms:<account-email>`
+
+## Sent/received attribution
+
+Outbound echoes are `EventSender{IsFromMe: true}`. Without double puppeting
+(README section) they render as the own-DID ghost, which GetUserInfo names
+`Me (+1 …)`. Parts 2..n of a split SMS have no bridgev2 message row — their
+poll echo is suppressed via SMSClient.markSentEcho/isSentEcho.
 
 ## VoIP.ms API gotchas (verified against the official docs + michaelkourlas/voipms-sms-client)
 
 - Single endpoint `https://voip.ms/api/v1/rest.php` (NEVER `www.` — redirect drops POST bodies)
-- `getMMS` + `all_messages=1` returns SMS **and** MMS under the `sms` JSON key
+- We poll `getSMS` + `getMMS` separately (both return rows under the `sms` JSON key). Do NOT go back to `getMMS all_messages=1`: it only reveals MMS through `col_media*`, which the API frequently omits, so image-only MMS get misclassified/dropped. A cross-batch dedup drops any getSMS row mirroring an MMS row.
 - Date filters are day-granular, max 92-day range; we always pass `timezone=-5` and parse timestamps as fixed UTC-5
-- Empty results come back as `status:"no_sms"`/`no_mms` (not an error); `invalid_did` is per-DID and non-fatal
+- Empty results come back as `status:"no_sms"`/`no_mms`/`no_phonebook` (not an error); `invalid_did` is per-DID and non-fatal
 - Message bodies are URL-encoded (`+` = space)
 - `getMMS` often omits `col_media*` — `getMediaMMS(id, media_as_array=1)` is the reliable media source
+- Phonebook: `getPhonebook`/`addPhonebook`/`setPhonebook`, entries under `phonebooks` with fields `phonebook` (id), `name`, `number`, `speed_dial`, `callerid`, `note`. Used for contact naming + `!matrisms rename`
 - sendSMS caps at 160 chars (`sms_toolong`); sendMMS: 2048 chars text + 3 media ≤ ~1.3 MB each
 - API sends are capped at 100 msgs/day by default (`limit_reached`); per-minute throttle exists (`api_limit_exceeded`)
 - Dedup relies on bridgev2 ignoring remote messages whose network MessageID already exists — outbound sends store their VoIP.ms id at send time, so the poll echo no-ops

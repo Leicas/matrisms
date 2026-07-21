@@ -161,20 +161,72 @@ func (sc *SMSConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
 func (sc *SMSConnector) GetUserInfo(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	number := strings.TrimPrefix(string(ghost.ID), "sms:")
 	name := common.FormatPhone(number)
+	normalized := common.NormalizePhone(number)
+	for _, client := range sc.activeClients() {
+		if client.OwnsDID(normalized) {
+			// Without double puppeting, the user's own sent messages fall
+			// back to this ghost — make it unmistakably "you".
+			name = fmt.Sprintf("Me (%s)", common.FormatPhone(number))
+			break
+		}
+		if contact := client.ContactName(ctx, normalized); contact != "" {
+			name = contact
+			break
+		}
+	}
 	return &bridgev2.UserInfo{
 		Name:        &name,
 		Identifiers: []string{fmt.Sprintf("tel:+%s", number)},
 	}, nil
 }
 
-// GetChatInfo builds room info for a (DID, peer) conversation portal.
+// contactNameFor resolves a peer's phonebook name via the portal's login,
+// falling back to any active client. Returns "" when unknown.
+func (sc *SMSConnector) contactNameFor(ctx context.Context, userLogin *bridgev2.UserLogin, peer string) string {
+	if userLogin != nil {
+		if client, ok := userLogin.Client.(*SMSClient); ok {
+			return client.ContactName(ctx, peer)
+		}
+	}
+	for _, client := range sc.activeClients() {
+		if name := client.ContactName(ctx, peer); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// GetChatInfo builds room info for the two portal kinds:
+//   - "did:<did>"       → the per-DID space grouping that number's chats
+//   - "sms:<did>:<peer>" → one conversation room, parented into the space
 func (sc *SMSConnector) GetChatInfo(ctx context.Context, portal *bridgev2.Portal, userLogin *bridgev2.UserLogin, portalKey networkid.PortalKey) (*bridgev2.ChatInfo, error) {
+	if did, ok := common.ParseDIDPortalID(portalKey.ID); ok {
+		spaceName := fmt.Sprintf("SMS %s", common.FormatPhone(did))
+		topic := fmt.Sprintf("Text conversations of your VoIP.ms number %s", common.FormatPhone(did))
+		members := &bridgev2.ChatMemberList{IsFull: true}
+		if userLogin != nil {
+			members.Members = []bridgev2.ChatMember{{
+				EventSender: bridgev2.EventSender{IsFromMe: true},
+				Membership:  "join",
+			}}
+		}
+		return &bridgev2.ChatInfo{
+			Name:    &spaceName,
+			Topic:   &topic,
+			Type:    ptr.Ptr(database.RoomTypeSpace),
+			Members: members,
+		}, nil
+	}
+
 	did, peer, ok := common.ParsePortalID(portalKey.ID)
 	if !ok {
 		return nil, fmt.Errorf("unrecognized portal ID %q", portalKey.ID)
 	}
 
 	roomName := common.FormatPhone(peer)
+	if contact := sc.contactNameFor(ctx, userLogin, peer); contact != "" {
+		roomName = contact
+	}
 	topic := fmt.Sprintf("SMS conversation with %s via your VoIP.ms number %s", common.FormatPhone(peer), common.FormatPhone(did))
 
 	ghostID := common.PhoneToGhostID(peer)
@@ -195,10 +247,11 @@ func (sc *SMSConnector) GetChatInfo(ctx context.Context, portal *bridgev2.Portal
 	}
 
 	return &bridgev2.ChatInfo{
-		Name:    &roomName,
-		Topic:   &topic,
-		Type:    ptr.Ptr(database.RoomTypeDM),
-		Members: members,
+		Name:     &roomName,
+		Topic:    &topic,
+		Type:     ptr.Ptr(database.RoomTypeDM),
+		ParentID: ptr.Ptr(common.DIDPortalIDFor(did)),
+		Members:  members,
 	}, nil
 }
 

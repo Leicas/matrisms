@@ -65,6 +65,24 @@ func ParsePortalID(id networkid.PortalID) (did, peer string, ok bool) {
 	return parts[1], parts[2], true
 }
 
+// DIDPortalIDFor builds the portal ID of the per-DID space that groups every
+// conversation room of one of our numbers. Scheme: "did:<did>". These portals
+// are created as Matrix spaces (RoomTypeSpace) and are set as the ParentID of
+// each "sms:<did>:<peer>" conversation portal.
+func DIDPortalIDFor(did string) networkid.PortalID {
+	return networkid.PortalID("did:" + NormalizePhone(did))
+}
+
+// ParseDIDPortalID extracts the DID from a "did:<did>" space portal ID.
+// Returns ok=false for portal IDs not created by DIDPortalIDFor.
+func ParseDIDPortalID(id networkid.PortalID) (did string, ok bool) {
+	raw, found := strings.CutPrefix(string(id), "did:")
+	if !found || raw == "" || strings.Contains(raw, ":") {
+		return "", false
+	}
+	return raw, true
+}
+
 // MessageIDFor builds the network message ID for a VoIP.ms message.
 // Scheme: "sms:<voipms-id>" or "mms:<voipms-id>" — VoIP.ms uses separate id
 // spaces for SMS and MMS, so the prefix keeps them collision-free.

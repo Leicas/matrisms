@@ -9,13 +9,15 @@ Text from Matrix using your own phone number(s). Each conversation gets its own 
 - **Two-way SMS**: send and receive plain texts; long messages are split automatically
 - **MMS media**: inbound pictures/audio/video are re-uploaded to your Matrix media repo; outbound images are sent as MMS (up to ~1.3 MB, JPG/PNG/GIF)
 - **Multiple numbers**: bridge any or all SMS-enabled DIDs on your account; each (your number, contact) pair gets its own room
+- **A space per number**: every bridged DID gets its own Matrix space grouping its conversation rooms
+- **Contact names**: rooms and ghost users are named from your VoIP.ms phonebook; rename from Matrix with `rename <name>` and it syncs back to the phonebook
 - **Instant delivery** (optional): a small webhook listener for the VoIP.ms *SMS URL Callback* so messages arrive instantly instead of on the next poll
 - **Encrypted credential storage**: your API password is AES-256-GCM encrypted at rest (PBKDF2 key from a passphrase you control)
 - **Poll-based with self-healing**: polling (default 30 s) is the source of truth; webhook is just a doorbell, so nothing is lost if the callback misfires
 
 ## How it works
 
-VoIP.ms has no push API, so the bridge polls `getMMS` (with `all_messages=1`, covering SMS and MMS) per bridged number and dedupes by message ID. Outbound messages go through `sendSMS` / `sendMMS`; the API echo of your own send is deduplicated automatically. Timestamps are handled in the API's fixed UTC-5 convention.
+VoIP.ms has no push API, so the bridge polls `getSMS` + `getMMS` per bridged number and dedupes by message ID. Outbound messages go through `sendSMS` / `sendMMS`; the API echo of your own send is deduplicated automatically. Timestamps are handled in the API's fixed UTC-5 convention.
 
 ## Setup
 
@@ -66,6 +68,31 @@ Enter your VoIP.ms account email and API password, pick which numbers to bridge,
 text 5551234567 hey there!
 ```
 
+### Strongly recommended: double puppeting
+
+Without double puppeting, messages you send from other devices (the VoIP.ms portal, split long messages, backfilled history) are shown as coming from a ghost user named `Me (+1 …)` instead of your own Matrix account. To make everything you sent appear as *you*:
+
+1. In the generated `registration.yaml`, add a **non-exclusive** namespace for all users on your homeserver:
+
+   ```yaml
+   namespaces:
+     users:
+       - regex: '@sms_.*:yourserver\.com'
+         exclusive: true
+       - regex: '@.*:yourserver\.com'
+         exclusive: false
+   ```
+
+2. In `config.yaml`, point double puppeting at the appservice token:
+
+   ```yaml
+   double_puppet:
+     secrets:
+       yourserver.com: as_token:$SAME_AS_TOKEN_AS_REGISTRATION
+   ```
+
+3. Restart the homeserver (to reload the registration), then the bridge, and re-run `login` or just keep using the bridge — the double puppet activates automatically.
+
 ### Optional: instant delivery webhook
 
 1. In `config.yaml`, set `network.webhook.enabled: true` and a `secret`.
@@ -85,6 +112,8 @@ The callback just triggers an immediate poll, so delivery stays correct even if 
 | `login` / `logout` | Connect / remove a VoIP.ms account |
 | `text <number> [message...]` | Open a room for a number (optionally send right away); use `text from:<your-num> <number> ...` with multiple DIDs |
 | `list` | List bridged numbers |
+| `rename [<number>] <name...>` | Name a contact (saved to the VoIP.ms phonebook); number optional inside a conversation room |
+| `sync` | Re-apply names, contact names, and per-DID spaces to existing rooms |
 | `status` | Connection / polling status |
 | `ping` | Liveness check |
 | `passphrase` | Where the DB encryption passphrase lives (admin) |
@@ -96,6 +125,8 @@ See the generated `config.yaml` — the `network:` block covers:
 - `voipms.poll_interval_seconds` (default 30)
 - `voipms.startup_backfill_hours` (default 24, `-1` to disable)
 - `voipms.max_upload_bytes` — inbound MMS media cap (default 25 MiB)
+- `voipms.phonebook_names` (default true) — name rooms/ghosts from the VoIP.ms phonebook
+- `voipms.phonebook_refresh_minutes` (default 15) — phonebook cache TTL
 - `webhook.*` — instant-delivery listener
 - `logging.sanitized` — redact phone numbers/bodies from logs
 

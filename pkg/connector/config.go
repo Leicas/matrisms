@@ -38,6 +38,14 @@ type VoIPmsConfig struct {
 	// MaxUploadBytes caps a single inbound MMS media upload to Matrix.
 	// Default 25 MiB. Set 0 to disable the check.
 	MaxUploadBytes int `yaml:"max_upload_bytes"`
+
+	// PhonebookNames controls whether the VoIP.ms phonebook is used to name
+	// ghosts and rooms after contacts. Default true (nil = unset = true).
+	PhonebookNames *bool `yaml:"phonebook_names"`
+
+	// PhonebookRefreshMinutes is how long phonebook contact names are cached
+	// before being re-fetched. Default 15.
+	PhonebookRefreshMinutes int `yaml:"phonebook_refresh_minutes"`
 }
 
 const DefaultMaxUploadBytes = 25 * 1024 * 1024 // 25 MiB
@@ -67,6 +75,19 @@ func (v VoIPmsConfig) EffectiveBackfill() time.Duration {
 		return 24 * time.Hour
 	}
 	return time.Duration(v.StartupBackfillHours) * time.Hour
+}
+
+// EffectivePhonebookNames reports whether phonebook naming is enabled.
+func (v VoIPmsConfig) EffectivePhonebookNames() bool {
+	return v.PhonebookNames == nil || *v.PhonebookNames
+}
+
+// EffectivePhonebookRefresh returns the phonebook cache TTL.
+func (v VoIPmsConfig) EffectivePhonebookRefresh() time.Duration {
+	if v.PhonebookRefreshMinutes <= 0 {
+		return 15 * time.Minute
+	}
+	return time.Duration(v.PhonebookRefreshMinutes) * time.Minute
 }
 
 // EffectiveMaxUploadBytes returns the MMS upload cap.
@@ -130,6 +151,8 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Int, "voipms", "poll_interval_seconds")
 	helper.Copy(up.Int, "voipms", "startup_backfill_hours")
 	helper.Copy(up.Int, "voipms", "max_upload_bytes")
+	helper.Copy(up.Bool, "voipms", "phonebook_names")
+	helper.Copy(up.Int, "voipms", "phonebook_refresh_minutes")
 
 	helper.Copy(up.Bool, "webhook", "enabled")
 	helper.Copy(up.Str, "webhook", "listen_address")

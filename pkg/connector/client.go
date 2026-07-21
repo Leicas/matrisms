@@ -3,7 +3,10 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
@@ -29,9 +32,93 @@ type SMSClient struct {
 
 	stateCoordinator *coordinator.StateCoordinator
 
+	// phonebook caches VoIP.ms phonebook names by normalized number.
+	phonebookMu sync.Mutex
+	phonebook   map[string]string
+	phonebookAt time.Time
+
+	// sentEchoIDs holds network message IDs of messages this bridge just sent
+	// whose poll echo must be skipped because bridgev2 has no DB row for them
+	// (parts 2..n of a split SMS, `!matrisms text` sends). Values are insert
+	// times for pruning.
+	sentEchoMu  sync.Mutex
+	sentEchoIDs map[networkid.MessageID]time.Time
+
 	ctx         context.Context
 	cancel      context.CancelFunc
 	isConnected atomic.Bool
+}
+
+// markSentEcho records a just-sent message ID so its poll echo is dropped.
+func (c *SMSClient) markSentEcho(id networkid.MessageID) {
+	c.sentEchoMu.Lock()
+	defer c.sentEchoMu.Unlock()
+	if c.sentEchoIDs == nil {
+		c.sentEchoIDs = make(map[networkid.MessageID]time.Time)
+	}
+	now := time.Now()
+	for k, t := range c.sentEchoIDs {
+		if now.Sub(t) > 24*time.Hour {
+			delete(c.sentEchoIDs, k)
+		}
+	}
+	c.sentEchoIDs[id] = now
+}
+
+// isSentEcho reports whether a message ID was recorded by markSentEcho.
+// The entry is kept (not popped): day-granular polling re-delivers the same
+// message on every sweep until the cursor day rolls over.
+func (c *SMSClient) isSentEcho(id networkid.MessageID) bool {
+	c.sentEchoMu.Lock()
+	defer c.sentEchoMu.Unlock()
+	_, ok := c.sentEchoIDs[id]
+	return ok
+}
+
+// ContactName returns the phonebook name for a number, or "" when unknown or
+// phonebook naming is disabled. Results are cached per the configured TTL.
+func (c *SMSClient) ContactName(ctx context.Context, number string) string {
+	if !c.Main.Config.VoIPms.EffectivePhonebookNames() {
+		return ""
+	}
+	number = common.NormalizePhone(number)
+	c.phonebookMu.Lock()
+	defer c.phonebookMu.Unlock()
+	if time.Since(c.phonebookAt) > c.Main.Config.VoIPms.EffectivePhonebookRefresh() {
+		entries, err := c.API.GetPhonebook(ctx)
+		if err != nil {
+			c.UserLogin.Log.Warn().Err(err).Msg("Failed to refresh phonebook; keeping cached names")
+			// Back off for a minute so a broken phonebook API doesn't add a
+			// failing call to every ghost/room info fetch.
+			c.phonebookAt = time.Now().Add(time.Minute - c.Main.Config.VoIPms.EffectivePhonebookRefresh())
+		} else {
+			c.phonebook = make(map[string]string, len(entries))
+			for _, e := range entries {
+				if len(e.Number) >= 10 && e.Name != "" {
+					c.phonebook[e.Number] = e.Name
+				}
+			}
+			c.phonebookAt = time.Now()
+		}
+	}
+	return c.phonebook[number]
+}
+
+// InvalidatePhonebook drops the phonebook cache so the next lookup re-fetches.
+func (c *SMSClient) InvalidatePhonebook() {
+	c.phonebookMu.Lock()
+	defer c.phonebookMu.Unlock()
+	c.phonebookAt = time.Time{}
+}
+
+// OwnsDID reports whether a normalized number is one of this login's DIDs.
+func (c *SMSClient) OwnsDID(number string) bool {
+	for _, did := range c.DIDs {
+		if did == number {
+			return true
+		}
+	}
+	return false
 }
 
 var _ bridgev2.NetworkAPI = (*SMSClient)(nil)
@@ -167,12 +254,8 @@ func (c *SMSClient) Stop(ctx context.Context) {
 func (c *SMSClient) IsThisUser(ctx context.Context, userID networkid.UserID) bool {
 	// Our own side never appears as a ghost — outbound messages are
 	// attributed via IsFromMe. Check against our DIDs anyway for safety.
-	for _, did := range c.DIDs {
-		if userID == common.PhoneToGhostID(did) {
-			return true
-		}
-	}
-	return false
+	number := strings.TrimPrefix(string(userID), "sms:")
+	return c.OwnsDID(number)
 }
 
 func (c *SMSClient) GetChatInfo(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {

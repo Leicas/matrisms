@@ -3,7 +3,9 @@ package connector
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/commands"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 
@@ -49,6 +51,23 @@ func (sc *SMSConnector) createCommands() []commands.CommandHandler {
 				Section:     HelpSectionInfo,
 				Description: "Start a conversation with a number",
 				Args:        "<number> [message...]",
+			},
+		},
+		&commands.FullHandler{
+			Func: func(ce *commands.Event) { fnRename(ce, sc) },
+			Name: "rename",
+			Help: commands.HelpMeta{
+				Section:     HelpSectionInfo,
+				Description: "Name a contact (saved to your VoIP.ms phonebook)",
+				Args:        "[<number>] <name...>",
+			},
+		},
+		&commands.FullHandler{
+			Func: func(ce *commands.Event) { fnSync(ce, sc) },
+			Name: "sync",
+			Help: commands.HelpMeta{
+				Section:     HelpSectionInfo,
+				Description: "Refresh room names, contact names, and spaces for all your SMS rooms",
 			},
 		},
 		&commands.FullHandler{
@@ -196,6 +215,149 @@ func fnText(ce *commands.Event, sc *SMSConnector) {
 		client.Poller.TriggerPoll()
 		ce.Reply("📤 Sent.")
 	}
+}
+
+// clientForLoginID returns the user's SMSClient for a login ID ("" = first).
+func clientForLoginID(ce *commands.Event, loginID networkid.UserLoginID) *SMSClient {
+	for _, c := range getSMSClients(ce) {
+		if loginID == "" || c.UserLogin.ID == loginID {
+			return c
+		}
+	}
+	return nil
+}
+
+// refreshPortalAndGhost re-applies chat info (name, topic, parent space) to
+// one portal and, for DM portals, the peer ghost's profile.
+func refreshPortalAndGhost(ce *commands.Event, sc *SMSConnector, portal *bridgev2.Portal, client *SMSClient) error {
+	info, err := sc.GetChatInfo(ce.Ctx, portal, client.UserLogin, portal.PortalKey)
+	if err != nil {
+		return err
+	}
+	portal.UpdateInfo(ce.Ctx, info, client.UserLogin, nil, time.Now())
+
+	if _, peer, ok := common.ParsePortalID(portal.ID); ok {
+		ghost, err := ce.Bridge.GetGhostByID(ce.Ctx, common.PhoneToGhostID(peer))
+		if err != nil {
+			return err
+		}
+		userInfo, err := sc.GetUserInfo(ce.Ctx, ghost)
+		if err != nil {
+			return err
+		}
+		ghost.UpdateInfo(ce.Ctx, userInfo)
+	}
+	return nil
+}
+
+// fnRename saves a contact name to the VoIP.ms phonebook and refreshes the
+// ghost + rooms. Inside a conversation room the number can be omitted:
+//
+//	!matrisms rename Jane Doe
+//	!matrisms rename 5551234567 Jane Doe
+func fnRename(ce *commands.Event, sc *SMSConnector) {
+	args := ce.Args
+	peer := ""
+	if len(args) > 0 {
+		if maybe := common.NormalizePhone(args[0]); len(maybe) >= 11 {
+			peer = maybe
+			args = args[1:]
+		}
+	}
+	if peer == "" && ce.Portal != nil {
+		_, portalPeer, ok := common.ParsePortalID(ce.Portal.ID)
+		if ok {
+			peer = portalPeer
+		}
+	}
+	name := strings.TrimSpace(strings.Join(args, " "))
+	if peer == "" || name == "" {
+		ce.Reply("Usage: `rename [<number>] <name...>` — the number can be omitted inside a conversation room.")
+		return
+	}
+
+	client := clientForLoginID(ce, "")
+	if client == nil {
+		ce.Reply("No VoIP.ms accounts configured. Use `login` first.")
+		return
+	}
+
+	if _, err := client.API.SetContactName(ce.Ctx, peer, name); err != nil {
+		ce.Reply("❌ Saving to the VoIP.ms phonebook failed: %s", err.Error())
+		return
+	}
+	for _, c := range getSMSClients(ce) {
+		c.InvalidatePhonebook()
+	}
+
+	// Refresh every existing room with this peer (one per DID).
+	renamed := 0
+	portals, err := ce.Bridge.GetAllPortalsWithMXID(ce.Ctx)
+	if err == nil {
+		for _, portal := range portals {
+			_, portalPeer, ok := common.ParsePortalID(portal.ID)
+			if !ok || portalPeer != peer {
+				continue
+			}
+			portalClient := clientForLoginID(ce, portal.Receiver)
+			if portalClient == nil {
+				continue
+			}
+			if err := refreshPortalAndGhost(ce, sc, portal, portalClient); err != nil {
+				ce.Log.Warn().Err(err).Str("portal_id", string(portal.ID)).Msg("Failed to refresh portal after rename")
+				continue
+			}
+			renamed++
+		}
+	}
+	ce.Reply("✅ %s is now **%s** (saved to your VoIP.ms phonebook, %d room(s) updated).", common.FormatPhone(peer), name, renamed)
+}
+
+// fnSync re-applies names, topics, contact names, and per-DID spaces to all
+// of the user's existing SMS rooms — useful after upgrading the bridge or
+// editing the phonebook on voip.ms directly.
+func fnSync(ce *commands.Event, sc *SMSConnector) {
+	clients := getSMSClients(ce)
+	if len(clients) == 0 {
+		ce.Reply("No VoIP.ms accounts configured. Use `login` first.")
+		return
+	}
+	for _, c := range clients {
+		c.InvalidatePhonebook()
+	}
+	portals, err := ce.Bridge.GetAllPortalsWithMXID(ce.Ctx)
+	if err != nil {
+		ce.Reply("❌ Failed to list portals: %s", err.Error())
+		return
+	}
+	synced, failed := 0, 0
+	for _, portal := range portals {
+		var client *SMSClient
+		if did, ok := common.ParseDIDPortalID(portal.ID); ok {
+			for _, c := range clients {
+				if c.OwnsDID(did) {
+					client = c
+					break
+				}
+			}
+		} else if _, _, ok := common.ParsePortalID(portal.ID); ok {
+			client = clientForLoginID(ce, portal.Receiver)
+		}
+		if client == nil {
+			continue // not an SMS portal of this user
+		}
+		if err := refreshPortalAndGhost(ce, sc, portal, client); err != nil {
+			ce.Log.Warn().Err(err).Str("portal_id", string(portal.ID)).Msg("Portal sync failed")
+			failed++
+			continue
+		}
+		synced++
+	}
+	msg := fmt.Sprintf("🔄 Synced %d room(s)", synced)
+	if failed > 0 {
+		msg += fmt.Sprintf(", %d failed (see bridge logs)", failed)
+	}
+	ce.Reply("%s.", msg)
 }
 
 func fnPassphrase(ce *commands.Event, sc *SMSConnector) {

@@ -74,6 +74,12 @@ func (c *SMSClient) handleMatrixMessageOutbound(ctx context.Context, msg *bridge
 			}
 			if i == 0 {
 				voipmsID = id
+			} else {
+				// Only the first part gets a bridgev2 message row (the
+				// response can carry a single ID); suppress the poll echo of
+				// the remaining parts explicitly or they'd be re-bridged as
+				// duplicate incoming messages.
+				c.markSentEcho(common.MessageIDFor(false, id))
 			}
 		}
 	}
