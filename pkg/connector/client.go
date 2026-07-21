@@ -129,6 +129,13 @@ type SMSLoginMetadata struct {
 	APIUsername string `json:"api_username"`
 }
 
+// SMSMessageMetadata is stored on every bridged message row. Body lets
+// reaction-fallback texts ("Reacted 😂 to \"…\"") be resolved back to the
+// message they quote.
+type SMSMessageMetadata struct {
+	Body string `json:"body,omitempty"`
+}
+
 // LoadUserLogin creates the SMSClient for a stored login. Called by the
 // framework at startup for every saved login and right after a new login
 // completes.
@@ -321,10 +328,13 @@ func (c *SMSClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal
 				Caption: event.CapLevelFullySupported,
 			},
 		},
-		Reply:           event.CapLevelDropped, // sent as a plain message
-		Edit:            event.CapLevelRejected,
-		Delete:          event.CapLevelRejected,
-		Reaction:        event.CapLevelRejected,
+		Reply:  event.CapLevelDropped, // sent as a plain message
+		Edit:   event.CapLevelRejected,
+		Delete: event.CapLevelRejected,
+		// Sent as a fallback text ('Reacted 😂 to "…"'), the same convention
+		// phones use when a reaction can't ride a rich channel.
+		Reaction:        event.CapLevelPartialSupport,
+		ReactionCount:   1,
 		Thread:          event.CapLevelUnsupported,
 		LocationMessage: event.CapLevelRejected,
 		Poll:            event.CapLevelRejected,

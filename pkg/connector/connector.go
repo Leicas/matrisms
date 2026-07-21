@@ -288,6 +288,7 @@ func (sc *SMSConnector) GetDBMetaTypes() database.MetaTypes {
 		// metadata from the DB at startup, and LoadUserLogin fails with
 		// "no API username metadata" after a bridge restart.
 		UserLogin: func() any { return &SMSLoginMetadata{} },
+		Message:   func() any { return &SMSMessageMetadata{} },
 	}
 }
 

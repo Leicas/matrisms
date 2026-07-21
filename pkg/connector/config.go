@@ -46,6 +46,19 @@ type VoIPmsConfig struct {
 	// PhonebookRefreshMinutes is how long phonebook contact names are cached
 	// before being re-fetched. Default 15.
 	PhonebookRefreshMinutes int `yaml:"phonebook_refresh_minutes"`
+
+	// ConvertReactions turns inbound reaction-fallback texts ("Reacted 😂 to
+	// \"…\"", tapbacks, « A réagi 😂 à … ») into real Matrix reactions on the
+	// quoted message. Default true (nil = unset = true).
+	ConvertReactions *bool `yaml:"convert_reactions"`
+
+	// ReactionFallbackTemplate renders reactions sent from Matrix as SMS.
+	// Placeholders: {emoji}, {message}. Default: Reacted {emoji} to "{message}"
+	ReactionFallbackTemplate string `yaml:"reaction_fallback_template"`
+
+	// ReactionRemoveFallbackTemplate renders reaction removals sent from
+	// Matrix as SMS. Default: Removed {emoji} from "{message}"
+	ReactionRemoveFallbackTemplate string `yaml:"reaction_remove_fallback_template"`
 }
 
 const DefaultMaxUploadBytes = 25 * 1024 * 1024 // 25 MiB
@@ -88,6 +101,27 @@ func (v VoIPmsConfig) EffectivePhonebookRefresh() time.Duration {
 		return 15 * time.Minute
 	}
 	return time.Duration(v.PhonebookRefreshMinutes) * time.Minute
+}
+
+// EffectiveConvertReactions reports whether reaction-fallback conversion is on.
+func (v VoIPmsConfig) EffectiveConvertReactions() bool {
+	return v.ConvertReactions == nil || *v.ConvertReactions
+}
+
+// EffectiveReactionTemplate returns the outbound reaction SMS template.
+func (v VoIPmsConfig) EffectiveReactionTemplate() string {
+	if v.ReactionFallbackTemplate == "" {
+		return `Reacted {emoji} to "{message}"`
+	}
+	return v.ReactionFallbackTemplate
+}
+
+// EffectiveReactionRemoveTemplate returns the outbound reaction-removal SMS template.
+func (v VoIPmsConfig) EffectiveReactionRemoveTemplate() string {
+	if v.ReactionRemoveFallbackTemplate == "" {
+		return `Removed {emoji} from "{message}"`
+	}
+	return v.ReactionRemoveFallbackTemplate
 }
 
 // EffectiveMaxUploadBytes returns the MMS upload cap.
@@ -153,6 +187,9 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Int, "voipms", "max_upload_bytes")
 	helper.Copy(up.Bool, "voipms", "phonebook_names")
 	helper.Copy(up.Int, "voipms", "phonebook_refresh_minutes")
+	helper.Copy(up.Bool, "voipms", "convert_reactions")
+	helper.Copy(up.Str, "voipms", "reaction_fallback_template")
+	helper.Copy(up.Str, "voipms", "reaction_remove_fallback_template")
 
 	helper.Copy(up.Bool, "webhook", "enabled")
 	helper.Copy(up.Str, "webhook", "listen_address")

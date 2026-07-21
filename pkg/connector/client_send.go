@@ -93,8 +93,83 @@ func (c *SMSClient) handleMatrixMessageOutbound(ctx context.Context, msg *bridge
 			ID:        common.MessageIDFor(isMMS, voipmsID),
 			SenderID:  common.PhoneToGhostID(did),
 			Timestamp: time.Now(),
+			Metadata:  &SMSMessageMetadata{Body: body},
 		},
 	}, nil
+}
+
+var _ bridgev2.ReactionHandlingNetworkAPI = (*SMSClient)(nil)
+
+// PreHandleMatrixReaction declares one reaction per user per message (a new
+// reaction replaces the previous one, mirroring how phones treat them).
+func (c *SMSClient) PreHandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (bridgev2.MatrixReactionPreResponse, error) {
+	did, _, ok := common.ParsePortalID(msg.Portal.ID)
+	if !ok {
+		return bridgev2.MatrixReactionPreResponse{}, fmt.Errorf("cannot react in unrecognized portal %q", msg.Portal.ID)
+	}
+	return bridgev2.MatrixReactionPreResponse{
+		SenderID:     common.PhoneToGhostID(did),
+		EmojiID:      "",
+		Emoji:        msg.Content.RelatesTo.Key,
+		MaxReactions: 1,
+	}, nil
+}
+
+// HandleMatrixReaction sends the reaction as a fallback text — the same
+// convention phones use when a reaction can't ride a rich channel.
+func (c *SMSClient) HandleMatrixReaction(ctx context.Context, msg *bridgev2.MatrixReaction) (*database.Reaction, error) {
+	text, err := c.reactionFallbackText(c.Main.Config.VoIPms.EffectiveReactionTemplate(), msg.PreHandleResp.Emoji, msg.TargetMessage)
+	if err != nil {
+		return nil, err
+	}
+	did, peer, _ := common.ParsePortalID(msg.Portal.ID)
+	id, err := c.API.SendSMS(ctx, did, peer, text)
+	if err != nil {
+		return nil, humanizeSendError(err)
+	}
+	c.markSentEcho(common.MessageIDFor(false, id))
+	return &database.Reaction{}, nil
+}
+
+// HandleMatrixReactionRemove announces the removal the same way.
+func (c *SMSClient) HandleMatrixReactionRemove(ctx context.Context, msg *bridgev2.MatrixReactionRemove) error {
+	target, err := c.UserLogin.Bridge.DB.Message.GetFirstPartByID(ctx, c.UserLogin.ID, msg.TargetReaction.MessageID)
+	if err != nil || target == nil {
+		return fmt.Errorf("could not load reacted message: %w", err)
+	}
+	text, err := c.reactionFallbackText(c.Main.Config.VoIPms.EffectiveReactionRemoveTemplate(), msg.TargetReaction.Emoji, target)
+	if err != nil {
+		return err
+	}
+	did, peer, ok := common.ParsePortalID(msg.Portal.ID)
+	if !ok {
+		return fmt.Errorf("cannot send from unrecognized portal %q", msg.Portal.ID)
+	}
+	id, err := c.API.SendSMS(ctx, did, peer, text)
+	if err != nil {
+		return humanizeSendError(err)
+	}
+	c.markSentEcho(common.MessageIDFor(false, id))
+	return nil
+}
+
+// reactionFallbackText renders a reaction (or removal) as SMS text quoting
+// the target message.
+func (c *SMSClient) reactionFallbackText(template, emoji string, target *database.Message) (string, error) {
+	snippet := ""
+	if target != nil {
+		if meta, ok := target.Metadata.(*SMSMessageMetadata); ok {
+			snippet = meta.Body
+		}
+	}
+	if snippet == "" {
+		snippet = "(media)"
+	}
+	text := common.BuildReactionFallback(template, emoji, snippet)
+	if len(text) > voipms.SMSMaxLen {
+		return "", fmt.Errorf("reaction fallback text exceeds one SMS; shorten the template")
+	}
+	return text, nil
 }
 
 // downloadMatrixMedia pulls the Matrix media payload (encrypted or plain)

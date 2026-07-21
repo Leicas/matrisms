@@ -28,6 +28,24 @@ func (c *SMSClient) handleRemoteMessage(ctx context.Context, msg *voipms.Message
 		Receiver: c.UserLogin.ID,
 	}
 
+	// Reaction fallbacks ("Reacted 😂 to \"…\"", « A réagi 😂 à … ») become
+	// real Matrix reactions when the quoted message can be found; otherwise
+	// they fall through and bridge as plain text.
+	if !msg.IsMMS && c.Main.Config.VoIPms.EffectiveConvertReactions() {
+		if fb, ok := common.ParseReactionFallback(msg.Body); ok {
+			if target := c.findReactionTarget(ctx, portalKey, fb); target != "" {
+				if !c.UserLogin.QueueRemoteEvent(&SMSReactionEvent{
+					msg: msg, client: c, portalKey: portalKey,
+					target: target, fallback: fb,
+				}).Success {
+					return fmt.Errorf("queue remote reaction failed for message %s", msg.ID)
+				}
+				return nil
+			}
+			c.UserLogin.Log.Debug().Str("message_id", msg.ID).Msg("Reaction fallback text matched no recent message; bridging as text")
+		}
+	}
+
 	evt := &SMSMatrixEvent{msg: msg, client: c, portalKey: portalKey}
 
 	portal, err := c.UserLogin.Bridge.GetExistingPortalByKey(ctx, portalKey)
@@ -50,6 +68,77 @@ func (c *SMSClient) handleRemoteMessage(ctx context.Context, msg *voipms.Message
 		return fmt.Errorf("queue remote event failed for message %s", msg.ID)
 	}
 	return nil
+}
+
+// findReactionTarget scans recent messages in the portal (newest first) for
+// the one the fallback text quotes. Returns "" when nothing matches.
+func (c *SMSClient) findReactionTarget(ctx context.Context, portalKey networkid.PortalKey, fb *common.ReactionFallback) networkid.MessageID {
+	recent, err := c.UserLogin.Bridge.DB.Message.GetLastNInPortal(ctx, portalKey, 50)
+	if err != nil {
+		c.UserLogin.Log.Warn().Err(err).Msg("Failed to load recent messages for reaction target lookup")
+		return ""
+	}
+	for _, dbMsg := range recent {
+		meta, ok := dbMsg.Metadata.(*SMSMessageMetadata)
+		if !ok || meta.Body == "" {
+			continue
+		}
+		if fb.MatchesTarget(meta.Body) {
+			return dbMsg.ID
+		}
+	}
+	return ""
+}
+
+// SMSReactionEvent is a reaction-fallback SMS converted into a Matrix
+// reaction (or reaction removal) on the quoted message.
+type SMSReactionEvent struct {
+	msg       *voipms.Message
+	client    *SMSClient
+	portalKey networkid.PortalKey
+	target    networkid.MessageID
+	fallback  *common.ReactionFallback
+}
+
+var (
+	_ bridgev2.RemoteReaction           = (*SMSReactionEvent)(nil)
+	_ bridgev2.RemoteReactionRemove     = (*SMSReactionEvent)(nil)
+	_ bridgev2.RemoteEventWithTimestamp = (*SMSReactionEvent)(nil)
+)
+
+func (e *SMSReactionEvent) GetType() bridgev2.RemoteEventType {
+	if e.fallback.Remove {
+		return bridgev2.RemoteEventReactionRemove
+	}
+	return bridgev2.RemoteEventReaction
+}
+
+func (e *SMSReactionEvent) GetPortalKey() networkid.PortalKey { return e.portalKey }
+func (e *SMSReactionEvent) GetTimestamp() time.Time           { return e.msg.Date }
+
+func (e *SMSReactionEvent) GetSender() bridgev2.EventSender {
+	if !e.msg.Inbound {
+		return bridgev2.EventSender{Sender: common.PhoneToGhostID(e.msg.DID), IsFromMe: true}
+	}
+	return bridgev2.EventSender{Sender: common.PhoneToGhostID(e.msg.Contact)}
+}
+
+func (e *SMSReactionEvent) GetTargetMessage() networkid.MessageID { return e.target }
+
+// GetReactionEmoji returns an empty EmojiID: SMS senders effectively have one
+// reaction per message, so a new reaction replaces the previous one.
+func (e *SMSReactionEvent) GetReactionEmoji() (string, networkid.EmojiID) {
+	return e.fallback.Emoji, ""
+}
+
+func (e *SMSReactionEvent) GetRemovedEmojiID() networkid.EmojiID { return "" }
+
+func (e *SMSReactionEvent) AddLogContext(c zerolog.Context) zerolog.Context {
+	return c.
+		Str("voipms_message_id", e.msg.ID).
+		Str("reaction_target", string(e.target)).
+		Str("emoji", e.fallback.Emoji).
+		Bool("remove", e.fallback.Remove)
 }
 
 // SMSMatrixEvent implements bridgev2.RemoteMessage for one inbound (or
@@ -109,6 +198,9 @@ func (e *SMSMatrixEvent) ConvertMessage(ctx context.Context, portal *bridgev2.Po
 				MsgType: event.MsgText,
 				Body:    e.msg.Body,
 			},
+			// Body is kept in the DB row so later reaction fallbacks can be
+			// matched back to this message.
+			DBMetadata: &SMSMessageMetadata{Body: e.msg.Body},
 		})
 	}
 

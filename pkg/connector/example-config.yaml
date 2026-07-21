@@ -19,6 +19,14 @@ voipms:
     phonebook_names: true
     # How long (minutes) phonebook names are cached before re-fetching.
     phonebook_refresh_minutes: 15
+    # Convert reaction-fallback texts ('Reacted [emoji] to "..."', Apple
+    # tapbacks, French variants) into real Matrix reactions on the quoted
+    # message. Unrecognized texts always fall back to plain messages.
+    convert_reactions: true
+    # How reactions you send from Matrix are rendered as SMS.
+    # Placeholders: {emoji}, {message}
+    reaction_fallback_template: 'Reacted {emoji} to "{message}"'
+    reaction_remove_fallback_template: 'Removed {emoji} from "{message}"'
 
 # Optional instant-delivery webhook. When enabled, point the VoIP.ms
 # "SMS URL Callback" (Main Menu → DID Settings) at this listener and messages
