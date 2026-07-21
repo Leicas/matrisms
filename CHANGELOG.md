@@ -1,3 +1,10 @@
+## [1.2.0](https://github.com/Leicas/matrisms/compare/v1.1.0...v1.2.0) (2026-07-21)
+
+
+### Features
+
+* shrink oversized outbound MMS images to fit the VoIP.ms cap ([886350d](https://github.com/Leicas/matrisms/commit/886350d1babd0416c9245b57a64d6efdc2c6383c))
+
 ## [1.1.0](https://github.com/Leicas/matrisms/compare/v1.0.2...v1.1.0) (2026-07-21)
 
 
