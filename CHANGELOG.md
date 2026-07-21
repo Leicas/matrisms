@@ -1,3 +1,10 @@
+## [1.1.0](https://github.com/Leicas/matrisms/compare/v1.0.2...v1.1.0) (2026-07-21)
+
+
+### Features
+
+* per-DID spaces, phonebook contact names, clearer sent/received ([69b3784](https://github.com/Leicas/matrisms/commit/69b378450ce25edabff412b5e9d3dcf9588d9f48))
+
 ## [1.0.2](https://github.com/Leicas/matrisms/compare/v1.0.1...v1.0.2) (2026-07-21)
 
 
