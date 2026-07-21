@@ -1,3 +1,10 @@
+## [1.3.0](https://github.com/Leicas/matrisms/compare/v1.2.1...v1.3.0) (2026-07-21)
+
+
+### Features
+
+* VoIP.ms logo as bot avatar, space avatar, and network icon ([01b74f4](https://github.com/Leicas/matrisms/commit/01b74f4010c41e63b00bbf023c3ba14220717985))
+
 ## [1.2.1](https://github.com/Leicas/matrisms/compare/v1.2.0...v1.2.1) (2026-07-21)
 
 
