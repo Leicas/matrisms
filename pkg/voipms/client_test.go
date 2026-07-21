@@ -79,11 +79,11 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.S
 
 func TestGetMessagesParsing(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("method") != "getMMS" {
-			t.Errorf("expected getMMS, got %s", r.Form.Get("method"))
+		_ = r.ParseMultipartForm(32 << 20)
+		if r.FormValue("method") != "getMMS" {
+			t.Errorf("expected getMMS, got %s", r.FormValue("method"))
 		}
-		if r.Form.Get("all_messages") != "1" {
+		if r.FormValue("all_messages") != "1" {
 			t.Error("expected all_messages=1")
 		}
 		w.Write([]byte(`{"status":"success","sms":[
@@ -146,9 +146,9 @@ func TestAuthErrorDetection(t *testing.T) {
 
 func TestSendSMS(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("did") != "5551234567" || r.Form.Get("dst") != "5559876543" {
-			t.Errorf("bad did/dst: %s/%s", r.Form.Get("did"), r.Form.Get("dst"))
+		_ = r.ParseMultipartForm(32 << 20)
+		if r.FormValue("did") != "5551234567" || r.FormValue("dst") != "5559876543" {
+			t.Errorf("bad did/dst: %s/%s", r.FormValue("did"), r.FormValue("dst"))
 		}
 		w.Write([]byte(`{"status":"success","sms":4442}`))
 	})
@@ -163,9 +163,9 @@ func TestSendSMS(t *testing.T) {
 
 func TestSendMMSStringID(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if !strings.HasPrefix(r.Form.Get("media1"), "data:image/png;base64,") {
-			t.Errorf("media1 not a data URI: %.40s", r.Form.Get("media1"))
+		_ = r.ParseMultipartForm(32 << 20)
+		if !strings.HasPrefix(r.FormValue("media1"), "data:image/png;base64,") {
+			t.Errorf("media1 not a data URI: %.40s", r.FormValue("media1"))
 		}
 		w.Write([]byte(`{"status":"success","mms":"9001"}`))
 	})
@@ -203,8 +203,8 @@ func TestGetDIDsInfoFiltering(t *testing.T) {
 
 func TestGetMMSMedia(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("media_as_array") != "1" {
+		_ = r.ParseMultipartForm(32 << 20)
+		if r.FormValue("media_as_array") != "1" {
 			t.Error("expected media_as_array=1")
 		}
 		w.Write([]byte(`{"status":"success","media":["https://voip.ms/media.php?x=1","https://voip.ms/media.php?x=2"]}`))

@@ -1,11 +1,13 @@
 package voipms
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -98,8 +100,10 @@ func NewClient(baseURL, username, password string, log *zerolog.Logger) *Client 
 }
 
 // call performs one API request. All methods share the single rest.php
-// endpoint with a `method` param; we always POST form-urlencoded (both GET
-// and POST are accepted, but sendMMS media payloads don't fit in a URL).
+// endpoint with a `method` param. The body MUST be multipart/form-data:
+// rest.php parses a form-urlencoded POST body as a SOAP envelope and
+// faults with HTTP 500 (the official Android client also posts multipart).
+// GET works too, but sendMMS media payloads don't fit in a URL.
 func (c *Client) call(ctx context.Context, method string, params url.Values, out any) error {
 	form := url.Values{}
 	form.Set("api_username", c.Username)
@@ -112,11 +116,24 @@ func (c *Client) call(ctx context.Context, method string, params url.Values, out
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL, strings.NewReader(form.Encode()))
+	var reqBody bytes.Buffer
+	mw := multipart.NewWriter(&reqBody)
+	for k, vs := range form {
+		for _, v := range vs {
+			if err := mw.WriteField(k, v); err != nil {
+				return fmt.Errorf("voip.ms %s: build request: %w", method, err)
+			}
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return fmt.Errorf("voip.ms %s: build request: %w", method, err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL, &reqBody)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
