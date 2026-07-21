@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  matrisms:
+    image: ghcr.io/leicas/matrisms:latest
+    # build: .  # uncomment for local dev (without a published image)
+    restart: unless-stopped
+    # NOTE: SQLite DB path inside the container should use this data directory:
+    #
+    #   database:
+    #     type: sqlite3
+    #     uri: "file:/home/nonroot/app/data/matrisms.db?_fk=1"
+    #
+    volumes:
+      - ./config.yaml:/opt/matrisms/config.yaml:ro
+      - matrisms_data:/home/nonroot/app/data
+    environment:
+      - MAUTRIX_CONFIG_PATH=/opt/matrisms/config.yaml
+    networks:
+      - mautrix
+
+  # Optional example: PostgreSQL database
+  # Uncomment this block and configure database.type/uri in config.yaml if you prefer Postgres.
+  # postgres:
+  #   image: postgres:15-alpine
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: mautrix_matrisms
+  #     POSTGRES_PASSWORD: change_me
+  #     POSTGRES_DB: mautrix_matrisms
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - mautrix
+
+volumes:
+  matrisms_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+networks:
+  mautrix:
+    driver: bridge

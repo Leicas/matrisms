@@ -1,0 +1,32 @@
+# VoIP.ms API settings. Credentials are NOT configured here — run
+# `!matrisms login` from Matrix and they are stored encrypted in the bridge DB.
+voipms:
+    # Base URL of the VoIP.ms REST API. Only change for testing.
+    base_url: https://voip.ms/api/v1/rest.php
+    # How often (seconds) each account polls for new SMS/MMS. VoIP.ms has no
+    # push API besides the SMS URL callback (see webhook below), so polling is
+    # the baseline. Default 30. Don't go too low — VoIP.ms throttles.
+    poll_interval_seconds: 30
+    # How far back (hours) the first poll after login looks for messages.
+    # 0 means the default (24). Set -1 to only bridge new messages.
+    startup_backfill_hours: 24
+    # Max size in bytes for a single inbound MMS media upload to Matrix.
+    # 0 means the default (26214400 = 25 MiB). Set -1 to disable the check.
+    max_upload_bytes: 0
+
+# Optional instant-delivery webhook. When enabled, point the VoIP.ms
+# "SMS URL Callback" (Main Menu → DID Settings) at this listener and messages
+# arrive the moment VoIP.ms receives them; polling stays on as a safety net.
+# Callback URL format:
+#   https://your.host:29332/sms?token=<secret>&to={TO}&from={FROM}&message={MESSAGE}&id={ID}&date={TIMESTAMP}
+webhook:
+    enabled: false
+    listen_address: 0.0.0.0:29332
+    path: /sms
+    # Optional shared secret; when set, requests without ?token=<secret> are
+    # rejected. Strongly recommended for internet-reachable listeners.
+    secret: ""
+
+logging:
+    # When true, redact PII (phone numbers, message bodies) from debug logs.
+    sanitized: false
