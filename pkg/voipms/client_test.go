@@ -54,6 +54,16 @@ func TestDecodeBody(t *testing.T) {
 	if got := decodeBody("hello+world%21"); got != "hello world!" {
 		t.Errorf("decodeBody = %q", got)
 	}
+	// GSM-7 accents come percent-encoded as Latin-1 bytes (field case
+	// 2026-07: "arriv%E9e" rendered as a replacement character).
+	latin1 := "Votre+commande+des+Fermes+Lufa+est+arriv%E9e+%E0+votre+PDC%2C+D%E9panneur+Thomas.+Bon+app%E9tit%21"
+	if got := decodeBody(latin1); got != "Votre commande des Fermes Lufa est arrivée à votre PDC, Dépanneur Thomas. Bon appétit!" {
+		t.Errorf("decodeBody(latin1) = %q", got)
+	}
+	// Valid UTF-8 (UCS-2 messages, emoji) must pass through untouched.
+	if got := decodeBody("d%C3%A9j%C3%A0+vu+%F0%9F%98%89"); got != "déjà vu 😉" {
+		t.Errorf("decodeBody(utf8) = %q", got)
+	}
 }
 
 func TestCursorRoundtrip(t *testing.T) {
@@ -243,7 +253,10 @@ func TestSetContactNameAddsNew(t *testing.T) {
 		switch r.FormValue("method") {
 		case "getPhonebook":
 			w.Write([]byte(`{"status":"no_phonebook"}`))
-		case "addPhonebook":
+		case "setPhonebook":
+			if r.FormValue("phonebook") != "" {
+				t.Errorf("create path must not send a phonebook id, got %q", r.FormValue("phonebook"))
+			}
 			if r.FormValue("number") != "5559876543" {
 				t.Errorf("number should be 10-digit for the API: %q", r.FormValue("number"))
 			}

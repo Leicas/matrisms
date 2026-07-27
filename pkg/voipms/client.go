@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 )
@@ -254,12 +255,23 @@ func apiDID(number string) string {
 }
 
 // decodeBody undoes the URL-encoding VoIP.ms applies to message bodies
-// (spaces come back as '+').
+// (spaces come back as '+'). GSM-7 accents are percent-encoded as single
+// Latin-1 bytes (%E9 = é), which are invalid UTF-8 once unescaped — those
+// bodies are reinterpreted as Latin-1 so "arriv\xe9e" renders as "arrivée"
+// instead of a replacement character.
 func decodeBody(raw string) string {
-	if decoded, err := url.QueryUnescape(raw); err == nil {
-		return decoded
+	decoded := raw
+	if d, err := url.QueryUnescape(raw); err == nil {
+		decoded = d
 	}
-	return raw
+	if !utf8.ValidString(decoded) {
+		runes := make([]rune, 0, len(decoded))
+		for _, b := range []byte(decoded) {
+			runes = append(runes, rune(b))
+		}
+		decoded = string(runes)
+	}
+	return decoded
 }
 
 // messageRow is the wire shape of one getSMS/getMMS row. Both methods return
@@ -435,13 +447,16 @@ func (c *Client) SetContactName(ctx context.Context, number, name string) (*Phon
 		return &e, nil
 	}
 
+	// There is no addPhonebook method (the API answers invalid_method):
+	// setPhonebook is an upsert — with a `phonebook` id it updates, without
+	// one it creates the entry.
 	params := url.Values{}
 	params.Set("name", name)
 	params.Set("number", apiDID(number))
 	var out struct {
 		Phonebook json.Number `json:"phonebook"`
 	}
-	if err := c.call(ctx, "addPhonebook", params, &out); err != nil {
+	if err := c.call(ctx, "setPhonebook", params, &out); err != nil {
 		return nil, err
 	}
 	return &PhonebookEntry{ID: out.Phonebook.String(), Name: name, Number: number}, nil
