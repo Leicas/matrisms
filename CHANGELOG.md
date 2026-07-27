@@ -1,3 +1,10 @@
+## [1.7.0](https://github.com/Leicas/matrisms/compare/v1.6.0...v1.7.0) (2026-07-27)
+
+
+### Features
+
+* sync Element room renames into the VoIP.ms phonebook ([0bd9d9c](https://github.com/Leicas/matrisms/commit/0bd9d9c70fe42b7cad4faa3ba570a1e72c84dfa5))
+
 ## [1.6.0](https://github.com/Leicas/matrisms/compare/v1.5.0...v1.6.0) (2026-07-27)
 
 
