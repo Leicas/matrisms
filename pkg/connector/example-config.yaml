@@ -27,6 +27,11 @@ voipms:
     # Placeholders: {emoji}, {message}
     reaction_fallback_template: 'Reacted {emoji} to "{message}"'
     reaction_remove_fallback_template: 'Removed {emoji} from "{message}"'
+    # VoIP.ms reassembles long inbound multipart SMS in segment-arrival order,
+    # which sometimes scrambles the text. When true, the bridge detects
+    # structurally-scrambled bodies and restores the original segment order
+    # (conservative: only rewrites on unambiguous evidence).
+    unscramble_segments: true
 
 # Optional instant-delivery webhook. When enabled, point the VoIP.ms
 # "SMS URL Callback" (Main Menu → DID Settings) at this listener and messages

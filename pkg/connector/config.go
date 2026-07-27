@@ -59,6 +59,12 @@ type VoIPmsConfig struct {
 	// ReactionRemoveFallbackTemplate renders reaction removals sent from
 	// Matrix as SMS. Default: Removed {emoji} from "{message}"
 	ReactionRemoveFallbackTemplate string `yaml:"reaction_remove_fallback_template"`
+
+	// UnscrambleSegments repairs long inbound messages whose segments VoIP.ms
+	// reassembled in arrival order instead of sequence order. Conservative:
+	// only rewrites bodies with unambiguous structural evidence of scrambling.
+	// Default true (nil = unset = true).
+	UnscrambleSegments *bool `yaml:"unscramble_segments"`
 }
 
 const DefaultMaxUploadBytes = 25 * 1024 * 1024 // 25 MiB
@@ -106,6 +112,11 @@ func (v VoIPmsConfig) EffectivePhonebookRefresh() time.Duration {
 // EffectiveConvertReactions reports whether reaction-fallback conversion is on.
 func (v VoIPmsConfig) EffectiveConvertReactions() bool {
 	return v.ConvertReactions == nil || *v.ConvertReactions
+}
+
+// EffectiveUnscrambleSegments reports whether scrambled-segment repair is on.
+func (v VoIPmsConfig) EffectiveUnscrambleSegments() bool {
+	return v.UnscrambleSegments == nil || *v.UnscrambleSegments
 }
 
 // EffectiveReactionTemplate returns the outbound reaction SMS template.
@@ -190,6 +201,7 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Bool, "voipms", "convert_reactions")
 	helper.Copy(up.Str, "voipms", "reaction_fallback_template")
 	helper.Copy(up.Str, "voipms", "reaction_remove_fallback_template")
+	helper.Copy(up.Bool, "voipms", "unscramble_segments")
 
 	helper.Copy(up.Bool, "webhook", "enabled")
 	helper.Copy(up.Str, "webhook", "listen_address")

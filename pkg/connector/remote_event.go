@@ -28,6 +28,15 @@ func (c *SMSClient) handleRemoteMessage(ctx context.Context, msg *voipms.Message
 		Receiver: c.UserLogin.ID,
 	}
 
+	// VoIP.ms sometimes reassembles long multipart messages in the wrong
+	// segment order; repair before anything else looks at the body.
+	if !msg.IsMMS && c.Main.Config.VoIPms.EffectiveUnscrambleSegments() {
+		if fixed, ok := voipms.RepairScrambledBody(msg.Body); ok {
+			c.UserLogin.Log.Info().Str("message_id", msg.ID).Msg("Repaired scrambled multipart SMS segment order")
+			msg.Body = fixed
+		}
+	}
+
 	// Reaction fallbacks ("Reacted 😂 to \"…\"", « A réagi 😂 à … ») become
 	// real Matrix reactions when the quoted message can be found; otherwise
 	// they fall through and bridge as plain text.

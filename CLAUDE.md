@@ -47,6 +47,7 @@ poll echo is suppressed via SMSClient.markSentEcho/isSentEcho.
 - sendSMS caps at 160 chars (`sms_toolong`); sendMMS: 2048 chars text + 3 media ≤ ~1.3 MB each
 - API sends are capped at 100 msgs/day by default (`limit_reached`); per-minute throttle exists (`api_limit_exceeded`)
 - Dedup relies on bridgev2 ignoring remote messages whose network MessageID already exists — outbound sends store their VoIP.ms id at send time, so the poll echo no-ops
+- VoIP.ms reassembles inbound multipart (long/UCS-2) SMS **server-side, in segment-arrival order, not UDH sequence order** — a long message can arrive as a single getSMS row with its ~67-char segments concatenated wrong (verified 2026-07-26: four copies of the same Leo notification, IDs 108872494/108875072/108877206/108878566, three scrambled in different orders, one correct). `SortMessages` only governs ordering *between* rows; within-row scrambles are repaired heuristically by `voipms.RepairScrambledBody` (block-permutation search over 67-unit UCS-2 / 153-char GSM-7 segments, gated on hard structural evidence — see `unscramble.go`; config `unscramble_segments`)
 
 ## Build & test
 
