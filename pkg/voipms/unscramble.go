@@ -1,6 +1,7 @@
 package voipms
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -132,6 +133,12 @@ var pairedPunct = [][2]rune{{'«', '»'}, {'“', '”'}, {'(', ')'}}
 
 const closingPunct = "»”’)!?.,;:"
 
+// gluedTLD matches a domain suffix jammed straight into an uppercase letter
+// ("lufa.comCourgettes") — the signature of a trailing "- brand.com" sign-off
+// scrambled into the middle of the text. Legit prose puts a space or
+// punctuation after a URL.
+var gluedTLD = regexp.MustCompile(`[a-z]\.(?:com|net|org|ca|fr|io|co|ms|info)[A-Z]`)
+
 // looksScrambled reports hard structural evidence that a body is out of
 // order: paired punctuation closing before it opens (or never closing), or a
 // message starting with closing punctuation. A merely-lowercase first letter
@@ -142,6 +149,9 @@ func looksScrambled(body string) bool {
 		return false
 	}
 	if strings.ContainsRune(closingPunct, runes[0]) {
+		return true
+	}
+	if gluedTLD.MatchString(body) {
 		return true
 	}
 	for _, p := range pairedPunct {
@@ -206,6 +216,8 @@ func scoreAssembly(parts []string) int {
 			score++
 		}
 	}
+
+	score -= 2 * len(gluedTLD.FindAllStringIndex(full, -1))
 
 	at := 0
 	for _, part := range parts[:len(parts)-1] {

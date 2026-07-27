@@ -3,6 +3,7 @@ package voipms
 import (
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 // The real field case from 2026-07-26 (VoIP.ms rows 108872494 / 108875072 /
@@ -64,6 +65,25 @@ func TestRepairScrambledBodyASCII(t *testing.T) {
 	}
 	if _, ok := RepairScrambledBody(full); ok {
 		t.Error("RepairScrambledBody rewrote a clean ASCII body")
+	}
+}
+
+// Second field case (2026-07-27, Lufa marketing SMS): no paired punctuation
+// at all — detection rides on the "lufa.comCourgettes" glued-TLD signature.
+// The emoji make this a surrogate-pair-heavy UCS-2 body.
+func TestRepairScrambledBodyGluedURL(t *testing.T) {
+	const full = "Courgettes bios gratuites et arc-en-ciel maraîcher dans votre panier. 🍓🍑🥕🥒🥬🍆🥦🍇 - lufa.com"
+	units := utf16.Encode([]rune(full))
+	a, b := string(utf16.Decode(units[:67])), string(utf16.Decode(units[67:]))
+	if !strings.HasSuffix(a, "panie") {
+		t.Fatalf("unexpected segment cut: a=%q", a)
+	}
+	got, ok := RepairScrambledBody(b + a)
+	if !ok || got != full {
+		t.Errorf("RepairScrambledBody(lufa scramble) = (%q, %v), want repaired", got, ok)
+	}
+	if _, ok := RepairScrambledBody(full); ok {
+		t.Error("RepairScrambledBody rewrote the clean lufa message")
 	}
 }
 

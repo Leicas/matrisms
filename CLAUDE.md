@@ -41,9 +41,9 @@ poll echo is suppressed via SMSClient.markSentEcho/isSentEcho.
 - We poll `getSMS` + `getMMS` separately (both return rows under the `sms` JSON key). Do NOT go back to `getMMS all_messages=1`: it only reveals MMS through `col_media*`, which the API frequently omits, so image-only MMS get misclassified/dropped. A cross-batch dedup drops any getSMS row mirroring an MMS row.
 - Date filters are day-granular, max 92-day range; we always pass `timezone=-5` and parse timestamps as fixed UTC-5
 - Empty results come back as `status:"no_sms"`/`no_mms`/`no_phonebook` (not an error); `invalid_did` is per-DID and non-fatal
-- Message bodies are URL-encoded (`+` = space)
+- Message bodies are URL-encoded (`+` = space); GSM-7 accents arrive percent-encoded as **Latin-1** bytes (`%E9` = é) — `decodeBody` reinterprets as Latin-1 whenever the unescaped result isn't valid UTF-8
 - `getMMS` often omits `col_media*` — `getMediaMMS(id, media_as_array=1)` is the reliable media source
-- Phonebook: `getPhonebook`/`addPhonebook`/`setPhonebook`, entries under `phonebooks` with fields `phonebook` (id), `name`, `number`, `speed_dial`, `callerid`, `note`. Used for contact naming + `!matrisms rename`
+- Phonebook: `getPhonebook`/`setPhonebook` only — there is NO `addPhonebook` (invalid_method); `setPhonebook` is an upsert (with `phonebook` id = update, without = create). Entries under `phonebooks` with fields `phonebook` (id), `name`, `number`, `speed_dial`, `callerid`, `note`. Used for contact naming + `!matrisms rename`
 - sendSMS caps at 160 chars (`sms_toolong`); sendMMS: 2048 chars text + 3 media ≤ ~1.3 MB each
 - API sends are capped at 100 msgs/day by default (`limit_reached`); per-minute throttle exists (`api_limit_exceeded`)
 - Dedup relies on bridgev2 ignoring remote messages whose network MessageID already exists — outbound sends store their VoIP.ms id at send time, so the poll echo no-ops
