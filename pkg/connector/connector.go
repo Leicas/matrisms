@@ -252,6 +252,9 @@ func (sc *SMSConnector) GetChatInfo(ctx context.Context, portal *bridgev2.Portal
 		members.Members = append(members.Members, bridgev2.ChatMember{
 			EventSender: bridgev2.EventSender{IsFromMe: true},
 			Membership:  "join",
+			// PL 50 lets the user edit the room name in their client, which
+			// HandleMatrixRoomName syncs into the VoIP.ms phonebook.
+			PowerLevel: ptr.Ptr(50),
 		})
 	}
 
