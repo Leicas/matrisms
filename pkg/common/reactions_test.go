@@ -23,6 +23,12 @@ func TestParseReactionFallback(t *testing.T) {
 		{`Removed a question mark from "what"`, "❓", "what", false, true},
 		{"A adoré « superbe »", "❤️", "superbe", false, false},
 		{"N’a pas aimé « bof »", "👎", "bof", false, false},
+		// "attribué la mention" wording, exactly as seen in the field
+		// (lowercase leading "a", named tapback in the mention slot).
+		{"a attribué la mention « Adore » à « Avec enfant aujourd'hui, je quite le travail et la récupère à la guarderie. »", "❤️", "Avec enfant aujourd'hui, je quite le travail et la récupère à la guarderie.", false, false},
+		{"A attribué la mention « J’aime » à « ok »", "👍", "ok", false, false},
+		{"a attribué la mention « 😂 » à « lol »", "😂", "lol", false, false},
+		{"A retiré la mention « Adore » de « ok »", "❤️", "ok", false, true},
 	}
 	for _, c := range cases {
 		fb, ok := ParseReactionFallback(c.body)
@@ -43,6 +49,7 @@ func TestParseReactionFallbackRejectsPlainText(t *testing.T) {
 		"Liked it a lot",
 		"A réagi vite à « x »",
 		"Assez calme au travail aussi pour surveiller tes apps? 😉",
+		"a attribué la mention « Bravo » à « ok »", // unknown mention name
 	} {
 		if fb, ok := ParseReactionFallback(body); ok {
 			t.Errorf("ParseReactionFallback(%q) matched %+v, want no match", body, fb)
@@ -61,6 +68,17 @@ func TestReactionFallbackMatchesTarget(t *testing.T) {
 	exact := &ReactionFallback{Snippet: "ok"}
 	if !exact.MatchesTarget("ok") || exact.MatchesTarget("okay") {
 		t.Error("exact snippet must match exactly")
+	}
+	// The quote lost a space in transit ("proposeren" vs "proposer en") —
+	// exactly what happened in the field on 2026-07.
+	mangled := &ReactionFallback{Snippet: "Peut être bien, j'ai pas trop autre chose à proposeren ce moment 😉"}
+	if !mangled.MatchesTarget("Peut être bien, j'ai pas trop autre chose à proposer en ce moment 😉") {
+		t.Error("whitespace-mangled quote should still match its target")
+	}
+	// Curly vs straight apostrophe (GSM-7 transcoding).
+	curly := &ReactionFallback{Snippet: "j’arrive bientôt"}
+	if !curly.MatchesTarget("j'arrive bientôt") {
+		t.Error("curly/straight apostrophe difference should be ignored")
 	}
 }
 
