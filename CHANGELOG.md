@@ -1,3 +1,15 @@
+## [1.5.0](https://github.com/Leicas/matrisms/compare/v1.4.0...v1.5.0) (2026-07-27)
+
+
+### Features
+
+* repair multipart SMS scrambled by VoIP.ms arrival-order reassembly ([f0c09d8](https://github.com/Leicas/matrisms/commit/f0c09d8f09274152f5fae7a8fa12b80f222b0f62))
+
+
+### Bug Fixes
+
+* detect French 'attribué la mention' reactions and mangled quotes ([2a94058](https://github.com/Leicas/matrisms/commit/2a940581ffde76fc5b461a242d3bf1d6cd193d44))
+
 ## [1.4.0](https://github.com/Leicas/matrisms/compare/v1.3.0...v1.4.0) (2026-07-21)
 
 
