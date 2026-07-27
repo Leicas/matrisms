@@ -1,3 +1,15 @@
+## [1.6.0](https://github.com/Leicas/matrisms/compare/v1.5.0...v1.6.0) (2026-07-27)
+
+
+### Features
+
+* detect glued-URL scrambles without paired punctuation ([70094f8](https://github.com/Leicas/matrisms/commit/70094f82913193733cdfd9f0840705a8c5d0356f))
+
+
+### Bug Fixes
+
+* decode Latin-1 bodies and create phonebook entries via setPhonebook ([c3c6d6b](https://github.com/Leicas/matrisms/commit/c3c6d6bf39a8cf3d945a6fde42870e9d9bae248c))
+
 ## [1.5.0](https://github.com/Leicas/matrisms/compare/v1.4.0...v1.5.0) (2026-07-27)
 
 
