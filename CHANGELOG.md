@@ -1,3 +1,15 @@
+## [1.8.0](https://github.com/Leicas/matrisms/compare/v1.7.0...v1.8.0) (2026-07-30)
+
+
+### Features
+
+* retry failed VoIP.ms connections with configurable backoff ([2176861](https://github.com/Leicas/matrisms/commit/217686138722ae92ef4303daeceb2f45401c3694))
+
+
+### Bug Fixes
+
+* **coordinator:** recognize the poller component in bridge state ([83a6489](https://github.com/Leicas/matrisms/commit/83a64890f6909bbf05741ce2b266a050c8d764d9))
+
 ## [1.7.0](https://github.com/Leicas/matrisms/compare/v1.6.0...v1.7.0) (2026-07-27)
 
 
