@@ -65,6 +65,22 @@ type VoIPmsConfig struct {
 	// only rewrites bodies with unambiguous structural evidence of scrambling.
 	// Default true (nil = unset = true).
 	UnscrambleSegments *bool `yaml:"unscramble_segments"`
+
+	// ConnectRetryIntervalSeconds is the initial wait before retrying a failed
+	// connection attempt (credential check or a poll loop that died). The wait
+	// doubles after each consecutive failure up to
+	// ConnectRetryMaxIntervalSeconds. Default 30. Set -1 to disable retries and
+	// restore the old behaviour of giving up on the first failure.
+	ConnectRetryIntervalSeconds int `yaml:"connect_retry_interval_seconds"`
+
+	// ConnectRetryMaxIntervalSeconds caps the exponential backoff between
+	// connection retries. Default 600 (10 minutes).
+	ConnectRetryMaxIntervalSeconds int `yaml:"connect_retry_max_interval_seconds"`
+
+	// ConnectMaxRetries limits how many consecutive retries are attempted
+	// before the bridge gives up until the next restart or `!matrisms login`.
+	// Default 0 = retry forever. A successful connection resets the counter.
+	ConnectMaxRetries int `yaml:"connect_max_retries"`
 }
 
 const DefaultMaxUploadBytes = 25 * 1024 * 1024 // 25 MiB
@@ -117,6 +133,32 @@ func (v VoIPmsConfig) EffectiveConvertReactions() bool {
 // EffectiveUnscrambleSegments reports whether scrambled-segment repair is on.
 func (v VoIPmsConfig) EffectiveUnscrambleSegments() bool {
 	return v.UnscrambleSegments == nil || *v.UnscrambleSegments
+}
+
+// ConnectRetryEnabled reports whether failed connections are retried at all.
+func (v VoIPmsConfig) ConnectRetryEnabled() bool {
+	return v.ConnectRetryIntervalSeconds >= 0
+}
+
+// EffectiveConnectRetryInterval returns the initial connection-retry backoff.
+func (v VoIPmsConfig) EffectiveConnectRetryInterval() time.Duration {
+	if v.ConnectRetryIntervalSeconds <= 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(v.ConnectRetryIntervalSeconds) * time.Second
+}
+
+// EffectiveConnectRetryMaxInterval returns the connection-retry backoff cap.
+// It is never shorter than the initial interval.
+func (v VoIPmsConfig) EffectiveConnectRetryMaxInterval() time.Duration {
+	max := 10 * time.Minute
+	if v.ConnectRetryMaxIntervalSeconds > 0 {
+		max = time.Duration(v.ConnectRetryMaxIntervalSeconds) * time.Second
+	}
+	if initial := v.EffectiveConnectRetryInterval(); max < initial {
+		return initial
+	}
+	return max
 }
 
 // EffectiveReactionTemplate returns the outbound reaction SMS template.
@@ -202,6 +244,9 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Str, "voipms", "reaction_fallback_template")
 	helper.Copy(up.Str, "voipms", "reaction_remove_fallback_template")
 	helper.Copy(up.Bool, "voipms", "unscramble_segments")
+	helper.Copy(up.Int, "voipms", "connect_retry_interval_seconds")
+	helper.Copy(up.Int, "voipms", "connect_retry_max_interval_seconds")
+	helper.Copy(up.Int, "voipms", "connect_max_retries")
 
 	helper.Copy(up.Bool, "webhook", "enabled")
 	helper.Copy(up.Str, "webhook", "listen_address")

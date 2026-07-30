@@ -189,34 +189,109 @@ func (sc *SMSConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserL
 }
 
 // Connect starts the poll loop. The framework calls this in a goroutine
-// after LoadUserLogin.
+// after LoadUserLogin. The connection is supervised: a failed credential check
+// or a poll loop that dies is retried with exponential backoff, so a transient
+// VoIP.ms outage no longer stops inbound SMS until the next manual restart.
 func (c *SMSClient) Connect(ctx context.Context) {
 	c.stateCoordinator.ReportSimpleEvent("poller", "connection_started", false, "", nil)
+	go c.supervise()
+}
 
-	// Validate credentials once before declaring the connection healthy.
-	if _, err := c.API.VerifyCredentials(c.ctx); err != nil {
+// supervise runs connectAndPoll, retrying on failure until the client is
+// disconnected, the credentials are definitively rejected, or the configured
+// retry budget is exhausted.
+func (c *SMSClient) supervise() {
+	cfg := c.Main.Config.VoIPms
+	backoff := cfg.EffectiveConnectRetryInterval()
+	maxBackoff := cfg.EffectiveConnectRetryMaxInterval()
+	attempt := 0
+
+	for c.ctx.Err() == nil {
+		connected, err := c.connectAndPoll()
+		if err == nil {
+			// Deliberate disconnect.
+			return
+		}
+		if connected {
+			// The connection worked at least once, so this is a fresh failure
+			// rather than a continuing one: restart the backoff ramp.
+			backoff = cfg.EffectiveConnectRetryInterval()
+			attempt = 0
+		}
+		if voipms.IsAuthError(err) {
+			// Bad credentials won't fix themselves; the user must re-login.
+			c.UserLogin.Log.Error().Err(err).Msg("VoIP.ms credentials rejected; not retrying")
+			return
+		}
+		if !cfg.ConnectRetryEnabled() {
+			c.UserLogin.Log.Error().Err(err).Msg("VoIP.ms connection failed and retries are disabled")
+			return
+		}
+		attempt++
+		if cfg.ConnectMaxRetries > 0 && attempt > cfg.ConnectMaxRetries {
+			c.UserLogin.Log.Error().Err(err).
+				Int("attempts", attempt-1).
+				Msg("VoIP.ms connection retry budget exhausted; giving up until restart")
+			return
+		}
+		c.UserLogin.Log.Warn().Err(err).
+			Int("attempt", attempt).
+			Dur("retry_in", backoff).
+			Msg("Retrying VoIP.ms connection after failure")
+		if !c.sleepCtx(backoff) {
+			return
+		}
+		if backoff *= 2; backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+}
+
+// sleepCtx waits for d, returning false if the client was disconnected first.
+func (c *SMSClient) sleepCtx(d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-c.ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// connectAndPoll verifies credentials and then runs the poll loop until it
+// stops. connected reports whether polling actually started, and err is why it
+// stopped — nil meaning the client was disconnected deliberately.
+func (c *SMSClient) connectAndPoll() (connected bool, err error) {
+	if _, err = c.API.VerifyCredentials(c.ctx); err != nil {
+		if c.ctx.Err() != nil {
+			return false, nil
+		}
 		c.UserLogin.Log.Error().Err(err).Msg("VoIP.ms credential check failed")
 		errCode := coordinator.SMSConnectionFailed
 		if voipms.IsAuthError(err) {
 			errCode = SMSBadCredentials
 		}
 		c.stateCoordinator.ReportSimpleEvent("poller", "auth_failure", false, errCode, map[string]any{"go_error": err.Error()})
-		return
+		return false, err
 	}
 
 	c.isConnected.Store(true)
 	c.stateCoordinator.ReportSimpleEvent("poller", "connection_established", true, "", nil)
 	c.stateCoordinator.ReportSimpleEvent("poller", "idle_started", true, "", nil)
-
-	go func() {
-		err := c.Poller.Run(c.ctx)
-		if err != nil && c.ctx.Err() == nil {
-			c.UserLogin.Log.Error().Err(err).Msg("Poller stopped unexpectedly")
-			c.stateCoordinator.ReportSimpleEvent("poller", "connection_lost", false, coordinator.SMSPollFailed, map[string]any{"go_error": err.Error()})
-		}
-	}()
-
 	c.UserLogin.Log.Info().Strs("dids", c.DIDs).Msg("VoIP.ms SMS client connected; polling started")
+
+	err = c.Poller.Run(c.ctx)
+	c.isConnected.Store(false)
+	if c.ctx.Err() != nil {
+		return true, nil
+	}
+	if err == nil {
+		err = fmt.Errorf("poll loop stopped without an error")
+	}
+	c.UserLogin.Log.Error().Err(err).Msg("Poller stopped unexpectedly")
+	c.stateCoordinator.ReportSimpleEvent("poller", "connection_lost", false, coordinator.SMSPollFailed, map[string]any{"go_error": err.Error()})
+	return true, err
 }
 
 func (c *SMSClient) handlePollError(err error) {

@@ -32,6 +32,17 @@ voipms:
     # structurally-scrambled bodies and restores the original segment order
     # (conservative: only rewrites on unambiguous evidence).
     unscramble_segments: true
+    # Automatic reconnection. If the startup credential check fails, or the poll
+    # loop dies, the bridge waits this many seconds and tries again, doubling
+    # the wait after each consecutive failure up to
+    # connect_retry_max_interval_seconds. Without this a transient VoIP.ms /
+    # Cloudflare hiccup (e.g. HTTP 522) at startup silently stops inbound SMS
+    # until the bridge is restarted by hand. Set -1 to disable retries.
+    connect_retry_interval_seconds: 30
+    connect_retry_max_interval_seconds: 600
+    # How many consecutive retries before giving up until the next restart.
+    # 0 = retry forever. A successful connection resets the counter.
+    connect_max_retries: 0
 
 # Optional instant-delivery webhook. When enabled, point the VoIP.ms
 # "SMS URL Callback" (Main Menu → DID Settings) at this listener and messages
