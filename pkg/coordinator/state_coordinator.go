@@ -124,7 +124,11 @@ func (sc *StateCoordinator) updateComponentState(event ConnectionEvent) {
 	now := time.Now()
 
 	switch event.Component {
-	case "inbox":
+	// "poller" is what the VoIP.ms connector reports as; "inbox" is the
+	// inherited IMAP name for the same inbound component. Without the alias no
+	// case matched, so inbox.Connected was never set and the bridge state stayed
+	// BRIDGE_UNREACHABLE forever even while polling worked.
+	case "inbox", "poller":
 		sc.inbox.LastEvent = event.Event
 		sc.inbox.LastUpdate = now
 		sc.inbox.LastError = event.Error
@@ -146,6 +150,11 @@ func (sc *StateCoordinator) updateComponentState(event ConnectionEvent) {
 		case EventIdleRecovered:
 			sc.inbox.IdleRunning = true
 			sc.inbox.FailureCount = 0
+		case EventAuthFailure:
+			// Reachable mid-connection now that failed connections are retried.
+			sc.inbox.Connected = false
+			sc.inbox.IdleRunning = false
+			sc.inbox.FailureCount++
 		}
 
 	case "sent":
