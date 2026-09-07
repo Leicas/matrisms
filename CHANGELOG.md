@@ -1,3 +1,10 @@
+## [1.8.1](https://github.com/Leicas/matrisms/compare/v1.8.0...v1.8.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **connector:** keep the login valid while the poller is reconnecting ([e9b380d](https://github.com/Leicas/matrisms/commit/e9b380d14a76d4dcb8ac67d235eb5771500d5f30))
+
 ## [1.8.0](https://github.com/Leicas/matrisms/compare/v1.7.0...v1.8.0) (2026-07-30)
 
 
