@@ -44,8 +44,17 @@ type SMSClient struct {
 	sentEchoMu  sync.Mutex
 	sentEchoIDs map[networkid.MessageID]time.Time
 
-	ctx         context.Context
-	cancel      context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// loggedIn answers bridgev2's IsLoggedIn: do we hold credentials that
+	// have not been definitively rejected? It is set once the stored account
+	// is loaded and cleared only by a credential rejection or a logout.
+	// bridgev2 refuses every Matrix -> SMS event ("You're not logged in")
+	// while this is false, so it must NOT track the poller's liveness.
+	loggedIn atomic.Bool
+	// isConnected tracks the poll loop: true between a successful credential
+	// check and the poller stopping. Reported by `!matrisms status`.
 	isConnected atomic.Bool
 }
 
@@ -183,6 +192,10 @@ func (sc *SMSConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserL
 		Log:       &pollLog,
 	}
 
+	// Credentials exist and have not been rejected yet, so Matrix -> SMS
+	// sends may proceed even before the first poll cycle runs.
+	client.loggedIn.Store(true)
+
 	login.Client = client
 	sc.registerClient(login.ID, client)
 	return nil
@@ -271,6 +284,7 @@ func (c *SMSClient) connectAndPoll() (connected bool, err error) {
 		errCode := coordinator.SMSConnectionFailed
 		if voipms.IsAuthError(err) {
 			errCode = SMSBadCredentials
+			c.loggedIn.Store(false)
 		}
 		c.stateCoordinator.ReportSimpleEvent("poller", "auth_failure", false, errCode, map[string]any{"go_error": err.Error()})
 		return false, err
@@ -297,6 +311,7 @@ func (c *SMSClient) connectAndPoll() (connected bool, err error) {
 func (c *SMSClient) handlePollError(err error) {
 	if voipms.IsAuthError(err) {
 		c.isConnected.Store(false)
+		c.loggedIn.Store(false)
 		c.stateCoordinator.ReportSimpleEvent("poller", "auth_failure", false, SMSBadCredentials, map[string]any{"go_error": err.Error()})
 	}
 }
@@ -312,16 +327,24 @@ func (c *SMSClient) Disconnect() {
 	c.UserLogin.Log.Info().Msg("VoIP.ms SMS client disconnected")
 }
 
+// IsLoggedIn reports whether this login's VoIP.ms credentials are believed
+// valid. Per the bridgev2 contract this is about token validity, not
+// connectivity: a poller that is between retries (VoIP.ms outage, Cloudflare
+// 522 at startup) must still count as logged in, otherwise bridgev2 answers
+// every outbound message with "You're not logged in" even though sending
+// only needs the REST API, not the poll loop.
 func (c *SMSClient) IsLoggedIn() bool {
-	return c.isConnected.Load()
+	return c.loggedIn.Load()
 }
 
+// IsConnected reports whether the poll loop is currently running.
 func (c *SMSClient) IsConnected() bool {
 	return c.isConnected.Load()
 }
 
 func (c *SMSClient) LogoutRemote(ctx context.Context) {
 	c.UserLogin.Log.Info().Msg("Logging out VoIP.ms account")
+	c.loggedIn.Store(false)
 	if err := c.Main.DB.DeleteAccount(ctx, c.UserLogin.UserMXID.String(), c.APIUsername); err != nil {
 		c.UserLogin.Log.Error().Err(err).Msg("Failed to delete account from database")
 	}

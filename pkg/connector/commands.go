@@ -104,9 +104,12 @@ func fnStatus(ce *commands.Event, sc *SMSConnector) {
 	}
 	var b strings.Builder
 	for _, c := range clients {
-		state := "🔴 disconnected"
-		if c.IsConnected() {
+		state := "🟡 logged in, poller reconnecting"
+		switch {
+		case c.IsConnected():
 			state = "🟢 polling"
+		case !c.IsLoggedIn():
+			state = "🔴 credentials rejected — run `login` again"
 		}
 		fmt.Fprintf(&b, "**%s** — %s\n", c.APIUsername, state)
 		for _, did := range c.DIDs {

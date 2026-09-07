@@ -28,6 +28,15 @@ credential encryption, reliability helpers, and CI pipeline are shared DNA.
 - Message: `sms:<voipms-id>` / `mms:<voipms-id>` (separate id spaces per method)
 - UserLogin: `voipms:<account-email>`
 
+## Login vs. connection state (load-bearing)
+
+`SMSClient.IsLoggedIn` (bridgev2 contract: "are the credentials valid?") and
+`IsConnected` (is the poll loop running?) are separate flags. bridgev2 refuses
+every Matrix → SMS event with "You're not logged in" while `IsLoggedIn` is
+false, and outbound sends only need the REST API, so `loggedIn` is set when the
+stored account loads and cleared only by an `IsAuthError` rejection or
+`LogoutRemote` — never by poller backoff/reconnects (`connect_retry_*`).
+
 ## Sent/received attribution
 
 Outbound echoes are `EventSender{IsFromMe: true}`. Without double puppeting
