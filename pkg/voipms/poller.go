@@ -57,7 +57,12 @@ type Poller struct {
 	// OnError is notified of poll-cycle errors (for bridge state reporting).
 	// Optional.
 	OnError func(err error)
-	Log     *zerolog.Logger
+	// OnSuccess is notified after every poll cycle that completed without an
+	// error. A clean poll proves the credentials work, so the connector uses
+	// it to recover a login that an earlier auth error marked rejected.
+	// Optional.
+	OnSuccess func()
+	Log       *zerolog.Logger
 
 	trigger chan struct{}
 }
@@ -109,6 +114,8 @@ func (p *Poller) pollOnce(ctx context.Context) {
 			if p.OnError != nil {
 				p.OnError(err)
 			}
+		} else if p.OnSuccess != nil {
+			p.OnSuccess()
 		}
 	}
 }

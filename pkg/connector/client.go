@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -56,6 +57,18 @@ type SMSClient struct {
 	// isConnected tracks the poll loop: true between a successful credential
 	// check and the poller stopping. Reported by `!matrisms status`.
 	isConnected atomic.Bool
+	// lastAuthFailure remembers why VoIP.ms last rejected the credentials,
+	// for `!matrisms status`. nil while the credentials are believed valid.
+	lastAuthFailure atomic.Pointer[AuthFailure]
+}
+
+// AuthFailure is the most recent definitive credential rejection from
+// VoIP.ms (invalid_credentials, api_not_enabled, ip_not_enabled, ...).
+type AuthFailure struct {
+	// Status is the VoIP.ms API status string, or the Go error text when the
+	// rejection did not come as an APIError.
+	Status string
+	At     time.Time
 }
 
 // markSentEcho records a just-sent message ID so its poll echo is dropped.
@@ -189,6 +202,7 @@ func (sc *SMSConnector) LoadUserLogin(ctx context.Context, login *bridgev2.UserL
 		},
 		OnMessage: client.handleRemoteMessage,
 		OnError:   client.handlePollError,
+		OnSuccess: client.handlePollSuccess,
 		Log:       &pollLog,
 	}
 
@@ -211,8 +225,12 @@ func (c *SMSClient) Connect(ctx context.Context) {
 }
 
 // supervise runs connectAndPoll, retrying on failure until the client is
-// disconnected, the credentials are definitively rejected, or the configured
-// retry budget is exhausted.
+// disconnected or the configured retry budget is exhausted. A credential
+// rejection is retried too, at the backoff cap: it is almost always
+// ip_not_enabled after the server's public IP changed (or the API toggled off
+// in the portal), which gets fixed on the VoIP.ms side — and until the next
+// successful check bridgev2 answers every Matrix message with "You're not
+// logged in", so the bridge must not wait for a restart to notice the fix.
 func (c *SMSClient) supervise() {
 	cfg := c.Main.Config.VoIPms
 	backoff := cfg.EffectiveConnectRetryInterval()
@@ -232,9 +250,19 @@ func (c *SMSClient) supervise() {
 			attempt = 0
 		}
 		if voipms.IsAuthError(err) {
-			// Bad credentials won't fix themselves; the user must re-login.
-			c.UserLogin.Log.Error().Err(err).Msg("VoIP.ms credentials rejected; not retrying")
-			return
+			if !cfg.ConnectRetryEnabled() {
+				c.UserLogin.Log.Error().Err(err).Msg("VoIP.ms credentials rejected and retries are disabled; fix on voip.ms and run login again")
+				return
+			}
+			// Auth re-checks are one cheap getDIDsInfo call per interval and
+			// do not consume the connect_max_retries budget.
+			c.UserLogin.Log.Error().Err(err).
+				Dur("recheck_in", maxBackoff).
+				Msg("VoIP.ms credentials rejected; will re-check (fix on voip.ms: API enabled + server IP whitelisted, or run login again)")
+			if !c.sleepCtx(maxBackoff) {
+				return
+			}
+			continue
 		}
 		if !cfg.ConnectRetryEnabled() {
 			c.UserLogin.Log.Error().Err(err).Msg("VoIP.ms connection failed and retries are disabled")
@@ -284,12 +312,15 @@ func (c *SMSClient) connectAndPoll() (connected bool, err error) {
 		errCode := coordinator.SMSConnectionFailed
 		if voipms.IsAuthError(err) {
 			errCode = SMSBadCredentials
-			c.loggedIn.Store(false)
+			c.markCredentialsRejected(err)
 		}
 		c.stateCoordinator.ReportSimpleEvent("poller", "auth_failure", false, errCode, map[string]any{"go_error": err.Error()})
 		return false, err
 	}
 
+	// VoIP.ms accepted the credentials: this also recovers a login that an
+	// earlier rejection had parked in "not logged in".
+	c.markCredentialsValid()
 	c.isConnected.Store(true)
 	c.stateCoordinator.ReportSimpleEvent("poller", "connection_established", true, "", nil)
 	c.stateCoordinator.ReportSimpleEvent("poller", "idle_started", true, "", nil)
@@ -311,9 +342,51 @@ func (c *SMSClient) connectAndPoll() (connected bool, err error) {
 func (c *SMSClient) handlePollError(err error) {
 	if voipms.IsAuthError(err) {
 		c.isConnected.Store(false)
-		c.loggedIn.Store(false)
+		c.markCredentialsRejected(err)
 		c.stateCoordinator.ReportSimpleEvent("poller", "auth_failure", false, SMSBadCredentials, map[string]any{"go_error": err.Error()})
 	}
+}
+
+// handlePollSuccess runs after every clean poll cycle. The poll loop keeps
+// ticking through a mid-run auth error (handlePollError only flips the
+// flags), so the first poll that succeeds again is what restores the login
+// and the connected state — no bridge restart needed.
+func (c *SMSClient) handlePollSuccess() {
+	if c.ctx.Err() != nil {
+		// Disconnect already won; don't resurrect the flags.
+		return
+	}
+	if !c.isConnected.Swap(true) {
+		c.stateCoordinator.ReportSimpleEvent("poller", "connection_established", true, "", nil)
+	}
+	c.markCredentialsValid()
+}
+
+// markCredentialsRejected flips the login to "not logged in" after a
+// definitive VoIP.ms rejection and remembers why for `!matrisms status`.
+func (c *SMSClient) markCredentialsRejected(err error) {
+	failure := &AuthFailure{Status: err.Error(), At: time.Now()}
+	var apiErr *voipms.APIError
+	if errors.As(err, &apiErr) {
+		failure.Status = apiErr.Status
+	}
+	c.loggedIn.Store(false)
+	c.lastAuthFailure.Store(failure)
+}
+
+// markCredentialsValid restores the login once VoIP.ms accepts the
+// credentials again (successful credential check or poll).
+func (c *SMSClient) markCredentialsValid() {
+	if !c.loggedIn.Swap(true) {
+		c.UserLogin.Log.Info().Msg("VoIP.ms credentials accepted again; login restored")
+	}
+	c.lastAuthFailure.Store(nil)
+}
+
+// LastAuthFailure returns the most recent credential rejection, or nil while
+// the credentials are believed valid.
+func (c *SMSClient) LastAuthFailure() *AuthFailure {
+	return c.lastAuthFailure.Load()
 }
 
 const SMSBadCredentials = status.BridgeStateErrorCode("E-SMS-001")
@@ -332,7 +405,9 @@ func (c *SMSClient) Disconnect() {
 // connectivity: a poller that is between retries (VoIP.ms outage, Cloudflare
 // 522 at startup) must still count as logged in, otherwise bridgev2 answers
 // every outbound message with "You're not logged in" even though sending
-// only needs the REST API, not the poll loop.
+// only needs the REST API, not the poll loop. It goes false only on a
+// definitive rejection (markCredentialsRejected) or LogoutRemote, and comes
+// back by itself on the next accepted check or poll (markCredentialsValid).
 func (c *SMSClient) IsLoggedIn() bool {
 	return c.loggedIn.Load()
 }
