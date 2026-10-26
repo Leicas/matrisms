@@ -36,6 +36,11 @@ every Matrix → SMS event with "You're not logged in" while `IsLoggedIn` is
 false, and outbound sends only need the REST API, so `loggedIn` is set when the
 stored account loads and cleared only by an `IsAuthError` rejection or
 `LogoutRemote` — never by poller backoff/reconnects (`connect_retry_*`).
+A rejection is NOT terminal: `supervise` keeps re-checking at
+`connect_retry_max_interval_seconds` and the poller's `OnSuccess` hook
+(`handlePollSuccess`) restores `loggedIn` on the first accepted call, so an
+`ip_not_enabled` after a public-IP change heals itself once the whitelist is
+fixed, without a restart. `!matrisms status` shows the last rejection status.
 
 ## Sent/received attribution
 

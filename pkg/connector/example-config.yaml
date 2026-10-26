@@ -38,6 +38,9 @@ voipms:
     # connect_retry_max_interval_seconds. Without this a transient VoIP.ms /
     # Cloudflare hiccup (e.g. HTTP 522) at startup silently stops inbound SMS
     # until the bridge is restarted by hand. Set -1 to disable retries.
+    # A credential rejection (ip_not_enabled after your public IP changed,
+    # api_not_enabled, invalid_credentials) is re-checked every
+    # connect_retry_max_interval_seconds and heals once fixed on voip.ms.
     connect_retry_interval_seconds: 30
     connect_retry_max_interval_seconds: 600
     # How many consecutive retries before giving up until the next restart.

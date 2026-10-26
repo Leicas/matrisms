@@ -132,6 +132,24 @@ See the generated `config.yaml` — the `network:` block covers:
 
 Credentials are **never** in the config file: they're stored AES-256-GCM-encrypted in the bridge database. The key derives from `MATRISMS_PASSPHRASE` (env) or `./data/passphrase` (auto-generated). Keep that passphrase with your backups.
 
+## Troubleshooting
+
+**"Your message was not bridged: You're not logged in"** — bridgev2 says this
+whenever the login's credentials are not currently believed valid. Run
+`!matrisms status` in the bot room:
+
+- 🟢 *polling* / 🟡 *poller reconnecting* — the login is fine; if you still saw
+  the error you are on a build older than 1.8.1, pull the latest image.
+- 🔴 *credentials rejected* — VoIP.ms answered `ip_not_enabled` (your server's
+  public IP changed and is no longer in **Enable IP Addresses**),
+  `api_not_enabled` or `invalid_credentials`. Fix it on voip.ms; the bridge
+  re-checks on its own (every `connect_retry_max_interval_seconds`, 10 min by
+  default, or at the next poll) and comes back without a restart. `login`
+  again only if you actually changed the API password.
+- No accounts listed, or the bridge log says `Failed to load user login` —
+  the stored credentials could not be decrypted (passphrase changed, `data/`
+  volume replaced) or the account row is gone: run `login` again.
+
 ## License
 
 AGPL-3.0 — see [LICENSE](LICENSE).

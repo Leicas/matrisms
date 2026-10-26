@@ -109,7 +109,13 @@ func fnStatus(ce *commands.Event, sc *SMSConnector) {
 		case c.IsConnected():
 			state = "🟢 polling"
 		case !c.IsLoggedIn():
-			state = "🔴 credentials rejected — run `login` again"
+			state = "🔴 credentials rejected — on voip.ms check the API is enabled and this server's IP is whitelisted, or run `login` again"
+			if f := c.LastAuthFailure(); f != nil {
+				state += fmt.Sprintf(" · last error `%s` at %s", f.Status, f.At.UTC().Format("2006-01-02 15:04 UTC"))
+			}
+			if sc.Config.VoIPms.ConnectRetryEnabled() {
+				state += " · the bridge re-checks automatically"
+			}
 		}
 		fmt.Fprintf(&b, "**%s** — %s\n", c.APIUsername, state)
 		for _, did := range c.DIDs {
