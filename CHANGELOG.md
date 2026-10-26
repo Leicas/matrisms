@@ -1,3 +1,10 @@
+## [1.8.2](https://github.com/Leicas/matrisms/compare/v1.8.1...v1.8.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **connector:** recover the login by itself after a VoIP.ms credential rejection ([27b9cbf](https://github.com/Leicas/matrisms/commit/27b9cbfa6258470155481d512c703c8d1b7be43a))
+
 ## [1.8.1](https://github.com/Leicas/matrisms/compare/v1.8.0...v1.8.1) (2026-09-07)
 
 
